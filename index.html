@@ -460,9 +460,9 @@ select option { background: #14143a; }
 
   <div class="section-divider" style="margin-top:24px"></div>
   <div style="font-size:11px;color:var(--muted);margin-bottom:8px">⚠️ 危險操作</div>
-  <button class="btn btn-danger" style="width:100%;justify-content:center" onclick="resetAllData()">🗑️ 清除所有數據（選手庫＋歷史＋戰績）</button>
+  <button class="btn btn-danger" style="width:100%;justify-content:center" onclick="resetAllData()">🗑️ 清除戰績與歷史（保留選手）</button>
   <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6">
-    用於清掉舊測試資料、重新開始。此操作會刪除全部選手、生涯戰績與歷史賽事，無法復原。
+    將所有選手的生涯戰績歸零、清空歷史賽事。選手本身會保留，可重新開始累積。此操作無法復原。
   </div>
 </div>
 
@@ -571,6 +571,7 @@ let tState = {       // tournament state, synced per room
   champion: null,
   finished: false,
   archiveId: null,
+  lastActive: 0,
 };
 
 const FIREBASE_URL = 'https://beyblade-g3-default-rtdb.asia-southeast1.firebasedatabase.app';
@@ -650,6 +651,12 @@ function connectPlayerDb() {
   }, err => {
     console.error('archive error:', err);
   });
+
+  // Start periodic cleanup of idle rooms (runs every 10 minutes).
+  if (!window._idleCleanupTimer) {
+    cleanupIdleRooms(); // run once on connect
+    window._idleCleanupTimer = setInterval(cleanupIdleRooms, 10 * 60 * 1000);
+  }
 }
 
 // Join a room — only syncs the live tournament/scoring between two devices.
@@ -670,20 +677,23 @@ function connectFirebase(isAutoRejoin) {
   // Read existing room data ONCE before attaching live listener.
   roomRef.once('value').then(snap => {
     const data = snap.val();
-    if (data && data.bracket) {
-      // Room already has a tournament → adopt it
+    const isStale = data && data.lastActive && (Date.now() - data.lastActive > ROOM_IDLE_MS);
+
+    if (data && data.bracket && !isStale) {
+      // Room has an active (recent) tournament → adopt it
       tState = { ...tState, ...data };
       renderAll();
       renderActiveView();
     } else {
-      // Empty room.
-      // If this is an auto-rejoin of the SAME saved room on app load, keep
-      // local state (recovering a session). Otherwise (manually joining a
-      // new/different room), start clean so we don't carry an old bracket in.
-      if (!isAutoRejoin || switchingRoom) {
+      // Either empty room, or a stale room (idle > 1hr → discard its data).
+      if (isStale) {
+        roomRef.remove().catch(console.error); // wipe the stale tournament
+        clearLocalTournament();
+        showToast('🧹 房間閒置過久，已重置');
+      } else if (!isAutoRejoin || switchingRoom) {
         clearLocalTournament();
       }
-      syncTournament(); // push (possibly cleared) state as room's starting point
+      syncTournament(); // push fresh state as room's starting point
       renderAll();
     }
 
@@ -731,7 +741,36 @@ function openProfileRefresh() {
 }
 
 function syncPlayerDb() { if (playerDbRef) playerDbRef.set(playerDb).catch(console.error); }
-function syncTournament() { if (roomRef) roomRef.set(tState).catch(console.error); }
+function syncTournament() {
+  if (!roomRef) return;
+  tState.lastActive = Date.now(); // stamp activity time for idle cleanup
+  roomRef.set(tState).catch(console.error);
+}
+
+// Rooms idle longer than this are auto-deleted (unfinished, not archived).
+const ROOM_IDLE_MS = 60 * 60 * 1000; // 1 hour
+
+// Delete any room whose lastActive is older than ROOM_IDLE_MS.
+// Unfinished tournaments are simply discarded (never counted in history/stats).
+function cleanupIdleRooms() {
+  if (!db) return;
+  const cutoff = Date.now() - ROOM_IDLE_MS;
+  db.ref('rooms').once('value').then(snap => {
+    const rooms = snap.val() || {};
+    Object.entries(rooms).forEach(([roomId, data]) => {
+      const last = (data && data.lastActive) || 0;
+      if (last && last < cutoff) {
+        db.ref('rooms/' + roomId).remove().catch(console.error);
+        // If the deleted room is the one we're in, clear local view
+        if (roomId === currentRoom) {
+          clearLocalTournament();
+          renderAll();
+          showToast('🧹 房間閒置超過一小時，已自動清除');
+        }
+      }
+    });
+  }).catch(console.error);
+}
 
 // =========================================
 // TABS
@@ -788,6 +827,9 @@ function initCareer() {
 function saveNewPlayer() {
   const name = document.getElementById('newPlayerName').value.trim();
   if (!name) { showToast('請輸入選手名字'); return; }
+  // Prevent duplicate names (case-insensitive)
+  const exists = Object.values(playerDb).some(p => p.name.trim().toLowerCase() === name.toLowerCase());
+  if (exists) { showToast('⚠️ 已有同名選手：' + name); return; }
   const nick = document.getElementById('newPlayerNick').value.trim();
   const id = genId();
   playerDb[id] = { id, name, nick, color: selectedNewColor, career: initCareer() };
@@ -873,7 +915,12 @@ function editPlayer() {
 function saveEditPlayer() {
   const id = document.getElementById('editPlayerId').value;
   if (!playerDb[id]) return;
-  playerDb[id].name = document.getElementById('editPlayerName').value.trim() || playerDb[id].name;
+  const newName = document.getElementById('editPlayerName').value.trim();
+  if (!newName) { showToast('請輸入選手名字'); return; }
+  // Prevent duplicate names, excluding this same player
+  const clash = Object.values(playerDb).some(p => p.id !== id && p.name.trim().toLowerCase() === newName.toLowerCase());
+  if (clash) { showToast('⚠️ 已有同名選手：' + newName); return; }
+  playerDb[id].name = newName;
   playerDb[id].nick = document.getElementById('editPlayerNick').value.trim();
   playerDb[id].color = selectedEditColor;
   syncPlayerDb();
@@ -929,6 +976,11 @@ function toggleSetupPlayer(id) {
 function quickAddPlayer() {
   const name = document.getElementById('quickAddName').value.trim();
   if (!name) return;
+  const lower = name.toLowerCase();
+  // Check against library players and already-added temp players
+  const inLib = Object.values(playerDb).some(p => p.name.trim().toLowerCase() === lower);
+  const inTemp = (tState.tempPlayers||[]).some(n => n.trim().toLowerCase() === lower);
+  if (inLib || inTemp) { showToast('⚠️ 已有同名選手：' + name); return; }
   tState.tempPlayers = tState.tempPlayers || [];
   tState.tempPlayers.push(name);
   document.getElementById('quickAddName').value = '';
@@ -989,7 +1041,7 @@ function generateBracket() {
   tState.champion = null;
   tState.currentMatch = null;
   tState.finished = false;
-  tState.archiveId = null;
+  tState.archiveId = 't_' + Date.now(); // stable id from the start, used to tag history
 
   // Mark tournament participation in career
   libPlayers.forEach(p => {
@@ -1232,7 +1284,7 @@ function finishMatch(m, winnerIdx) {
       if (samePID(hp,p)) { c[h.type]++; c.totalScore+=h.pts; }
     });
     c.history = c.history||[];
-    c.history.push({ tournament: tState.name, opponent: opp?.name||opp, result: isWinner?'win':'loss', date: new Date().toLocaleDateString('zh-TW') });
+    c.history.push({ tid: tState.archiveId, tournament: tState.name, opponent: opp?.name||opp, result: isWinner?'win':'loss', date: new Date().toLocaleDateString('zh-TW') });
     if (c.history.length>50) c.history=c.history.slice(-50);
   };
   updateCareer(winner.id?winner:null, true,  loser);
@@ -1493,12 +1545,14 @@ function renderHistory() {
 
 function resetAllData() { requireAdmin(_resetAllData); }
 function _resetAllData() {
-  if (!confirm('⚠️ 確定要清除「所有」數據嗎？\n\n包含：全部選手、生涯戰績、歷史賽事。\n此操作無法復原！')) return;
-  if (!confirm('再次確認：真的要全部清除並重新開始嗎？')) return;
+  if (!confirm('⚠️ 確定要清除「戰績與歷史」嗎？\n\n包含：所有選手的生涯戰績、歷史賽事紀錄。\n（選手本身會保留，但數據歸零）\n此操作無法復原！')) return;
+  if (!confirm('再次確認：真的要清除所有戰績與歷史嗎？')) return;
 
-  // Clear player database
-  playerDb = {};
-  if (playerDbRef) playerDbRef.set(null).catch(console.error);
+  // Keep player library — reset each player's career stats to zero
+  Object.values(playerDb).forEach(p => {
+    p.career = initCareer();
+  });
+  syncPlayerDb();
 
   // Clear archive (history)
   archiveData = {};
@@ -1520,7 +1574,7 @@ function _resetAllData() {
   renderAll();
   renderHistory();
   document.getElementById('winBanner').style.display = 'none';
-  showToast('🗑️ 已清除所有數據，可重新開始');
+  showToast('🗑️ 已清除戰績與歷史（選手保留）');
 }
 
 function deleteHistoryRecord(id) { requireAdmin(()=>_deleteHistoryRecord(id)); }function _deleteHistoryRecord(id) {
@@ -1549,11 +1603,14 @@ function deleteHistoryRecord(id) { requireAdmin(()=>_deleteHistoryRecord(id)); }
     car.totalScore = Math.max(0, (car.totalScore||0) - (c.totalScore||0));
     car.championships = Math.max(0, (car.championships||0) - (c.championships||0));
     car.tournaments = Math.max(0, (car.tournaments||0) - (c.tournaments||0));
-    if (Array.isArray(car.history) && rec.name) {
-      let toRemove = c.histCount || 0;
-      for (let i = car.history.length - 1; i >= 0 && toRemove > 0; i--) {
-        if (car.history[i].tournament === rec.name) { car.history.splice(i, 1); toRemove--; }
-      }
+    // Remove this tournament's entries from the player's match history.
+    // Prefer exact match by tournament id (tid); fall back to name for old data.
+    if (Array.isArray(car.history)) {
+      car.history = car.history.filter(h => {
+        if (h.tid && rec.id) return h.tid !== rec.id;        // precise
+        if (rec.name) return h.tournament !== rec.name;       // fallback by name
+        return true;
+      });
     }
   });
 
