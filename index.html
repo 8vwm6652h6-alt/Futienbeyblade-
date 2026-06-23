@@ -457,6 +457,13 @@ select option { background: #14143a; }
     <div style="font-size:12px;margin-top:8px">完成決賽後會自動記錄於此</div>
   </div>
   <div id="historyContent" style="display:none"></div>
+
+  <div class="section-divider" style="margin-top:24px"></div>
+  <div style="font-size:11px;color:var(--muted);margin-bottom:8px">⚠️ 危險操作</div>
+  <button class="btn btn-danger" style="width:100%;justify-content:center" onclick="resetAllData()">🗑️ 清除所有數據（選手庫＋歷史＋戰績）</button>
+  <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6">
+    用於清掉舊測試資料、重新開始。此操作會刪除全部選手、生涯戰績與歷史賽事，無法復原。
+  </div>
 </div>
 
 <!-- CHAMPION MODAL -->
@@ -1445,18 +1452,55 @@ function renderHistory() {
   `).join('');
 }
 
-function deleteHistoryRecord(id) { requireAdmin(()=>_deleteHistoryRecord(id)); }
-function _deleteHistoryRecord(id) {
+function resetAllData() { requireAdmin(_resetAllData); }
+function _resetAllData() {
+  if (!confirm('⚠️ 確定要清除「所有」數據嗎？\n\n包含：全部選手、生涯戰績、歷史賽事。\n此操作無法復原！')) return;
+  if (!confirm('再次確認：真的要全部清除並重新開始嗎？')) return;
+
+  // Clear player database
+  playerDb = {};
+  if (playerDbRef) playerDbRef.set(null).catch(console.error);
+
+  // Clear archive (history)
+  archiveData = {};
+  if (archiveRef) archiveRef.set(null).catch(console.error);
+
+  // Clear current tournament state
+  tState.name = '';
+  tState.roster = [];
+  tState.tempPlayers = [];
+  tState.bracket = [];
+  tState.currentMatch = null;
+  tState.tStats = {};
+  tState.champion = null;
+  tState.finished = false;
+  tState.archiveId = null;
+  selectedSetupPlayers = new Set();
+  syncTournament();
+
+  renderAll();
+  renderHistory();
+  document.getElementById('winBanner').style.display = 'none';
+  showToast('🗑️ 已清除所有數據，可重新開始');
+}
+
+function deleteHistoryRecord(id) { requireAdmin(()=>_deleteHistoryRecord(id)); }function _deleteHistoryRecord(id) {
   const rec = archiveData[id];
   if (!rec) return;
   if (!confirm('確定刪除這場賽事紀錄？\n該場貢獻的選手生涯數據也會一併扣除。')) return;
 
-  // Reverse each player's career contribution from this tournament
-  const contrib = rec.contrib || {};
-  Object.entries(contrib).forEach(([pid, c]) => {
-    const p = playerDb[pid];
-    if (!p || !p.career) return;
-    const car = p.career;
+  // Get contribution snapshot; if missing (old record), rebuild from matches by name
+  let contrib = rec.contrib;
+  if (!contrib || !Object.keys(contrib).length) {
+    contrib = rebuildContribByName(rec);
+  }
+
+  // Reverse each player's career contribution from this tournament.
+  // Snapshot may be keyed by player id (new) or by name (rebuilt fallback).
+  Object.entries(contrib).forEach(([key, c]) => {
+    const p = playerDb[key] || Object.values(playerDb).find(pl => pl.name === key);
+    if (!p) return;
+    const car = p.career = p.career || initCareer();
     car.wins = Math.max(0, (car.wins||0) - (c.wins||0));
     car.losses = Math.max(0, (car.losses||0) - (c.losses||0));
     car.spin = Math.max(0, (car.spin||0) - (c.spin||0));
@@ -1466,7 +1510,6 @@ function _deleteHistoryRecord(id) {
     car.totalScore = Math.max(0, (car.totalScore||0) - (c.totalScore||0));
     car.championships = Math.max(0, (car.championships||0) - (c.championships||0));
     car.tournaments = Math.max(0, (car.tournaments||0) - (c.tournaments||0));
-    // Remove matching history entries for this tournament
     if (Array.isArray(car.history) && rec.name) {
       let toRemove = c.histCount || 0;
       for (let i = car.history.length - 1; i >= 0 && toRemove > 0; i--) {
@@ -1480,8 +1523,34 @@ function _deleteHistoryRecord(id) {
   delete archiveData[id];
   renderHistory();
   renderPlayerLibrary();
+  renderSetupPlayerList();
   renderRank();
   showToast('🗑️ 已刪除賽事並扣除相關數據');
+}
+
+// Rebuild per-player contribution from stored match results (by name),
+// used for older records that lack a contrib snapshot.
+function rebuildContribByName(rec) {
+  const contrib = {};
+  const ensure = (name) => contrib[name] || (contrib[name] = {wins:0,losses:0,spin:0,burst:0,over:0,xtreme:0,totalScore:0,championships:0,tournaments:0,histCount:0});
+  (rec.matches||[]).forEach(m => {
+    if (!m.p1 || !m.p2) return;
+    const played = (m.score1>0 || m.score2>0);
+    if (!played) return;
+    const winnerName = m.winner;
+    const loserName = (m.winner===m.p1) ? m.p2 : m.p1;
+    if (winnerName) { const c = ensure(winnerName); c.wins++; c.histCount++; }
+    if (loserName)  { const c = ensure(loserName);  c.losses++; c.histCount++; }
+    // We can't recover finish-type breakdown from match summary, but we can
+    // reverse the total score (sum of both players' points).
+    if (m.p1) ensure(m.p1).totalScore += (m.score1||0);
+    if (m.p2) ensure(m.p2).totalScore += (m.score2||0);
+  });
+  // participation
+  (rec.players||[]).forEach(name => ensure(name).tournaments++);
+  // championship
+  if (rec.champion) ensure(rec.champion).championships++;
+  return contrib;
 }
 
 function renderAll() {
