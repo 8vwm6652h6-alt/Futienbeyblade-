@@ -664,23 +664,38 @@ function connectFirebase() {
   // Detach previous room listener
   if (roomRef) { roomRef.off(); roomRef = null; }
 
-  // Per-room tournament state
   roomRef = db.ref('rooms/' + room);
-  roomRef.on('value', snap => {
+
+  // First load: read existing room data ONCE before attaching live listener,
+  // so we never overwrite an in-progress tournament with our local empty state.
+  roomRef.once('value').then(snap => {
     const data = snap.val();
-    if (data) { tState = { ...tState, ...data }; renderAll(); }
-  }, err => {
-    console.error('room error:', err);
+    if (data) {
+      // Room already has a tournament → adopt it
+      tState = { ...tState, ...data };
+      renderAll();
+    } else {
+      // Empty room → push our current state as the starting point
+      syncTournament();
+    }
+
+    // Now attach the live listener for real-time updates
+    roomRef.on('value', s => {
+      const d = s.val();
+      if (d) { tState = { ...tState, ...d }; renderActiveView(); }
+    }, err => {
+      console.error('room error:', err);
+    });
+  }).catch(err => {
+    console.error('room load error:', err);
     showToast('❌ 房間讀取失敗：' + err.message);
   });
 
   localStorage.setItem('fb_room', room);
-
   document.getElementById('syncBadge').className = 'sync-badge connected';
   document.getElementById('syncStatus').textContent = '房間 ' + room;
   closeModal('firebaseModal');
   showToast('✅ 已加入房間：' + room);
-  syncTournament();
 }
 
 // Helper: refresh open profile modal when playerDb updates
@@ -1559,6 +1574,26 @@ function renderAll() {
   renderBracket();
   renderBattleTab();
   renderRank();
+}
+
+// Faster: only re-render the tab the user is currently looking at.
+// Used for live sync updates so two devices feel instant.
+function renderActiveView() {
+  const active = document.querySelector('.section.active')?.id || '';
+  switch (active) {
+    case 'tab-players': renderPlayerLibrary(); break;
+    case 'tab-setup': renderSetupPlayerList(); break;
+    case 'tab-bracket': renderBracket(); break;
+    case 'tab-battle': renderBattleTab(); break;
+    case 'tab-rank': renderRank(); break;
+    case 'tab-history': renderHistory(); break;
+    default: renderBracket(); renderBattleTab();
+  }
+  // Champion banner / modal should appear on any view if final just decided
+  if (tState.champion) {
+    const wb = document.getElementById('winBanner');
+    if (wb && document.getElementById('tab-battle').classList.contains('active')) wb.style.display = 'block';
+  }
 }
 
 let toastTimer;
