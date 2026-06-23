@@ -459,6 +459,13 @@ select option { background: #14143a; }
   <div id="historyContent" style="display:none"></div>
 </div>
 
+<!-- CHAMPION MODAL -->
+<div class="modal-overlay" id="championModal">
+  <div class="modal modal-center" style="border-radius:16px;margin:20px auto;border-color:#666">
+    <div id="championModalContent"></div>
+  </div>
+</div>
+
 <!-- ADMIN LOCK MODAL -->
 <div class="modal-overlay" id="lockModal" onclick="if(event.target===this)closeModal('lockModal')">
   <div class="modal modal-center" style="border-radius:16px;margin:20px auto">
@@ -555,6 +562,8 @@ let tState = {       // tournament state, synced per room
   currentMatch: null,
   tStats: {},        // id/name -> {wins,losses,spin,burst,over,xtreme,totalScore} for THIS tournament
   champion: null,
+  finished: false,
+  archiveId: null,
 };
 
 const FIREBASE_URL = 'https://beyblade-g3-default-rtdb.asia-southeast1.firebasedatabase.app';
@@ -1199,10 +1208,11 @@ function finishMatch(m, winnerIdx) {
       if (winner.id && playerDb[winner.id]) {
         playerDb[winner.id].career.championships = (playerDb[winner.id].career.championships||0) + 1;
       }
-      document.getElementById('winnerName').textContent = winner?.name||winner;
-      document.getElementById('winBanner').style.display='block';
-      showToast('🏆 冠軍：'+(winner?.name||winner)+'！賽事結束');
+      // Record to history first
+      syncPlayerDb();
       archiveTournament(winner);
+      // Show champion screen with option to start next tournament
+      showChampionScreen(winner);
     }
   }
 
@@ -1214,6 +1224,44 @@ function finishMatch(m, winnerIdx) {
   loadMatch();
   renderRank();
   if (nextRound) showToast('🏁 '+(winner?.name||winner)+' 獲勝，晉級！');
+}
+
+// Champion celebration screen — tournament is locked & saved to history
+function showChampionScreen(winner) {
+  const name = winner?.name || winner;
+  const el = document.getElementById('championModalContent');
+  el.innerHTML = `
+    <div style="text-align:center;padding:8px 0">
+      <div style="font-size:48px;margin-bottom:8px">🏆</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:4px">本場冠軍</div>
+      <div style="font-family:Orbitron;font-size:26px;font-weight:900;color:#fff;margin-bottom:6px">${name}</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:20px">賽事已結束並存入歷史紀錄 📜</div>
+      <button class="btn btn-primary" style="margin-bottom:8px" onclick="startNextTournament()">🎲 開始下一場</button>
+      <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="closeModal('championModal')">查看對戰表</button>
+    </div>`;
+  showModal('championModal');
+}
+
+// Clear current tournament and return to setup for a fresh draw
+function startNextTournament() {
+  closeModal('championModal');
+  tState.name = '';
+  tState.roster = [];
+  tState.tempPlayers = [];
+  tState.bracket = [];
+  tState.currentMatch = null;
+  tState.tStats = {};
+  tState.champion = null;
+  tState.finished = false;
+  tState.archiveId = null;
+  selectedSetupPlayers = new Set();
+  syncTournament();
+  // Reset UI
+  document.getElementById('winBanner').style.display = 'none';
+  document.getElementById('tournamentName').value = '';
+  renderAll();
+  switchTab('setup');
+  showToast('✨ 已清除，可開始新賽事');
 }
 
 // =========================================
