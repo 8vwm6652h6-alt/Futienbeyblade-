@@ -237,7 +237,7 @@ select option { background: #14143a; }
   <div class="lock-badge" id="lockBadge" onclick="showLockModal()">🔒 <span id="lockLabel">未解鎖</span></div>
   <div class="sync-badge" id="syncBadge" onclick="showModal('firebaseModal')">
     <span class="sync-dot"></span>
-    <span id="syncStatus">未連線</span>
+    <span id="syncStatus">連線中…</span>
   </div>
   </div>
 </header>
@@ -420,18 +420,18 @@ select option { background: #14143a; }
 <!-- FIREBASE MODAL -->
 <div class="modal-overlay" id="firebaseModal" onclick="if(event.target===this)closeModal('firebaseModal')">
   <div class="modal modal-center" style="border-radius:16px;margin:20px auto">
-    <div class="modal-title">🔗 連線賽事同步</div>
+    <div class="modal-title">🔗 雙設備計分同步</div>
     <div style="background:#2a2a2a;border:1px solid #444;border-radius:8px;padding:12px;font-size:12px;color:#aaa;margin-bottom:16px;line-height:1.7">
-      兩台手機輸入<strong style="color:#eee">相同房間代號</strong>即可即時同步。<br>
-      選手資料庫為所有房間共用。
+      選手庫與歷史戰績<strong style="color:#eee">已自動連線</strong>，無需房間。<br><br>
+      房間代號僅用於<strong style="color:#eee">兩台手機同步當下賽事計分</strong>，兩台輸入相同代號即可。單機使用可略過。
     </div>
-    <label>房間代號</label>
+    <label>房間代號（選填）</label>
     <div class="row" style="margin-bottom:16px">
       <input type="text" id="roomId" placeholder="例：g3-finals" onkeydown="if(event.key==='Enter')connectFirebase()">
       <button class="btn btn-secondary btn-small" onclick="genRoomId()">隨機</button>
     </div>
-    <button class="btn btn-primary" onclick="connectFirebase()" style="margin-bottom:8px">🔗 連線</button>
-    <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="closeModal('firebaseModal')">取消</button>
+    <button class="btn btn-primary" onclick="connectFirebase()" style="margin-bottom:8px">🔗 加入房間</button>
+    <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="closeModal('firebaseModal')">關閉</button>
   </div>
 </div>
 
@@ -511,6 +511,7 @@ let tState = {       // tournament state, synced per room
 const FIREBASE_URL = 'https://beyblade-g3-default-rtdb.asia-southeast1.firebasedatabase.app';
 let db = null, roomRef = null, playerDbRef = null, isConnected = false;
 let firebaseApp = null;
+let currentRoom = null;
 
 let currentProfileId = null;
 let selectedNewColor = COLORS[4];
@@ -542,41 +543,49 @@ function initFirebase() {
   }
 }
 
+// Auto-connect player database on app load (no room needed).
+// Player library + career stats are bound to the app and load automatically.
+function connectPlayerDb() {
+  if (!initFirebase()) return;
+
+  // Connection state monitor (reflects player-db connection)
+  db.ref('.info/connected').on('value', snap => {
+    const connected = snap.val() === true;
+    const badge = document.getElementById('syncBadge');
+    const status = document.getElementById('syncStatus');
+    const room = currentRoom;
+    if (connected) {
+      isConnected = true;
+      badge.className = 'sync-badge connected';
+      status.textContent = room ? ('房間 ' + room) : '資料庫已連線';
+    } else if (isConnected) {
+      status.textContent = '重連中…';
+    }
+  });
+
+  // Shared player database — always loaded
+  if (playerDbRef) { playerDbRef.off(); }
+  playerDbRef = db.ref('playerDb');
+  playerDbRef.on('value', snap => {
+    const data = snap.val();
+    if (data) { playerDb = data; renderPlayerLibrary(); renderSetupPlayerList(); openProfileRefresh(); }
+  }, err => {
+    console.error('playerDb error:', err);
+    showToast('❌ 選手庫讀取失敗：' + err.message);
+  });
+}
+
+// Join a room — only syncs the live tournament/scoring between two devices.
 function connectFirebase() {
   const room = document.getElementById('roomId').value.trim();
   if (!room) { showToast('請輸入房間代號'); return; }
 
   if (!initFirebase()) return;
 
-  showToast('🔄 連線中…');
+  currentRoom = room;
 
-  // Detach previous listeners
-  if (playerDbRef) { playerDbRef.off(); playerDbRef = null; }
+  // Detach previous room listener
   if (roomRef) { roomRef.off(); roomRef = null; }
-
-  // Connection state monitor
-  db.ref('.info/connected').on('value', snap => {
-    const connected = snap.val() === true;
-    const badge = document.getElementById('syncBadge');
-    const status = document.getElementById('syncStatus');
-    if (connected) {
-      isConnected = true;
-      badge.className = 'sync-badge connected';
-      status.textContent = room;
-    } else if (isConnected) {
-      status.textContent = '重連中…';
-    }
-  });
-
-  // Shared player database
-  playerDbRef = db.ref('playerDb');
-  playerDbRef.on('value', snap => {
-    const data = snap.val();
-    if (data) { playerDb = data; renderPlayerLibrary(); renderSetupPlayerList(); }
-  }, err => {
-    console.error('playerDb error:', err);
-    showToast('❌ 讀取失敗：' + err.message + '（請檢查資料庫規則）');
-  });
 
   // Per-room tournament state
   roomRef = db.ref('rooms/' + room);
@@ -590,12 +599,19 @@ function connectFirebase() {
 
   localStorage.setItem('fb_room', room);
 
-  isConnected = true;
   document.getElementById('syncBadge').className = 'sync-badge connected';
-  document.getElementById('syncStatus').textContent = room;
+  document.getElementById('syncStatus').textContent = '房間 ' + room;
   closeModal('firebaseModal');
-  showToast('✅ 已連線！房間：' + room);
+  showToast('✅ 已加入房間：' + room);
   syncTournament();
+}
+
+// Helper: refresh open profile modal when playerDb updates
+function openProfileRefresh() {
+  const modal = document.getElementById('profileModal');
+  if (modal && modal.classList.contains('open') && currentProfileId && playerDb[currentProfileId]) {
+    openProfile(currentProfileId);
+  }
 }
 
 function syncPlayerDb() { if (playerDbRef) playerDbRef.set(playerDb).catch(console.error); }
@@ -1290,11 +1306,14 @@ initColorPicker('colorPicker', null, selectedNewColor);
 renderPlayerLibrary();
 renderSetupPlayerList();
 
-// Auto-reconnect to last room on page load
+// Auto-connect player database immediately (loads library + career stats)
 window.addEventListener('load', () => {
+  connectPlayerDb();
+  // Optionally rejoin last room for live scoring sync
   const savedRoom = localStorage.getItem('fb_room');
   if (savedRoom) {
     document.getElementById('roomId').value = savedRoom;
+    currentRoom = savedRoom;
     connectFirebase();
   }
 });
