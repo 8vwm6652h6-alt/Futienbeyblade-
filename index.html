@@ -1334,6 +1334,13 @@ function _deleteHistoryEntry(playerId, index) {
 function archiveTournament(champion) {
   const rnames = getRoundNames(tState.bracket.length);
   const matches = [];
+
+  // Build a per-player snapshot of EXACTLY what this tournament added to
+  // each library player's career, so deleting the record can reverse it.
+  // Keyed by player id (only library players have careers).
+  const contrib = {}; // id -> {wins,losses,spin,burst,over,xtreme,totalScore,championships,tournaments,histCount}
+  const ensure = (id) => contrib[id] || (contrib[id] = {wins:0,losses:0,spin:0,burst:0,over:0,xtreme:0,totalScore:0,championships:0,tournaments:0,histCount:0});
+
   (tState.bracket||[]).forEach((round, ri) => {
     round.forEach(m => {
       if (m.complete && m.p1 && m.p2) {
@@ -1345,9 +1352,30 @@ function archiveTournament(champion) {
           score2: m.score2,
           winner: m.winner?.name||m.winner
         });
+
+        // Skip BYE-style auto matches (no real history)
+        const realPlayed = (m.history && m.history.length) || (m.score1>0||m.score2>0);
+        if (!realPlayed) return;
+
+        const w = m.winner;
+        const l = samePID(m.winner, m.p1) ? m.p2 : m.p1;
+        // win/loss + one history entry each (matches finishMatch behaviour)
+        if (w?.id) { const c = ensure(w.id); c.wins++; c.histCount++; }
+        if (l?.id) { const c = ensure(l.id); c.losses++; c.histCount++; }
+        // finish-type points per player
+        (m.history||[]).forEach(h => {
+          const p = h.pi===0 ? m.p1 : m.p2;
+          if (p?.id) { const c = ensure(p.id); c[h.type]++; c.totalScore += h.pts; }
+        });
       }
     });
   });
+
+  // Participation (tournaments++) was added in generateBracket for each roster player
+  (tState.roster||[]).forEach(id => { if (playerDb[id]) ensure(id).tournaments++; });
+
+  // Championship
+  if (champion?.id) ensure(champion.id).championships++;
 
   const names = new Set();
   (tState.bracket?.[0]||[]).forEach(m => {
@@ -1355,8 +1383,6 @@ function archiveTournament(champion) {
     if (m.p2) names.add(m.p2.name||m.p2);
   });
 
-  // Stable ID based on tournament start, so a duplicate archive call
-  // overwrites the same record instead of creating a second one.
   const id = tState.archiveId || ('t_' + Date.now());
   tState.archiveId = id;
 
@@ -1366,7 +1392,8 @@ function archiveTournament(champion) {
     champion: champion?.name || champion,
     date: new Date().toLocaleString('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
     players: [...names],
-    matches
+    matches,
+    contrib   // ← per-player career contribution for reversal on delete
   };
 
   if (archiveRef) {
@@ -1420,11 +1447,41 @@ function renderHistory() {
 
 function deleteHistoryRecord(id) { requireAdmin(()=>_deleteHistoryRecord(id)); }
 function _deleteHistoryRecord(id) {
-  if (!confirm('確定刪除這場賽事紀錄？')) return;
+  const rec = archiveData[id];
+  if (!rec) return;
+  if (!confirm('確定刪除這場賽事紀錄？\n該場貢獻的選手生涯數據也會一併扣除。')) return;
+
+  // Reverse each player's career contribution from this tournament
+  const contrib = rec.contrib || {};
+  Object.entries(contrib).forEach(([pid, c]) => {
+    const p = playerDb[pid];
+    if (!p || !p.career) return;
+    const car = p.career;
+    car.wins = Math.max(0, (car.wins||0) - (c.wins||0));
+    car.losses = Math.max(0, (car.losses||0) - (c.losses||0));
+    car.spin = Math.max(0, (car.spin||0) - (c.spin||0));
+    car.burst = Math.max(0, (car.burst||0) - (c.burst||0));
+    car.over = Math.max(0, (car.over||0) - (c.over||0));
+    car.xtreme = Math.max(0, (car.xtreme||0) - (c.xtreme||0));
+    car.totalScore = Math.max(0, (car.totalScore||0) - (c.totalScore||0));
+    car.championships = Math.max(0, (car.championships||0) - (c.championships||0));
+    car.tournaments = Math.max(0, (car.tournaments||0) - (c.tournaments||0));
+    // Remove matching history entries for this tournament
+    if (Array.isArray(car.history) && rec.name) {
+      let toRemove = c.histCount || 0;
+      for (let i = car.history.length - 1; i >= 0 && toRemove > 0; i--) {
+        if (car.history[i].tournament === rec.name) { car.history.splice(i, 1); toRemove--; }
+      }
+    }
+  });
+
+  syncPlayerDb();
   if (archiveRef) archiveRef.child(id).remove().catch(console.error);
   delete archiveData[id];
   renderHistory();
-  showToast('🗑️ 已刪除賽事紀錄');
+  renderPlayerLibrary();
+  renderRank();
+  showToast('🗑️ 已刪除賽事並扣除相關數據');
 }
 
 function renderAll() {
