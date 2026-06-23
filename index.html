@@ -138,17 +138,53 @@ label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: block
 
 /* BRACKET */
 .bracket-container { overflow-x: auto; padding-bottom: 12px; }
-.bracket { display: flex; gap: 20px; min-width: max-content; padding: 8px 0; }
-.round-col { display: flex; flex-direction: column; }
+.bracket { display: flex; min-width: max-content; padding: 8px 0; }
+.round-col { display: flex; flex-direction: column; justify-content: space-around; }
 .round-label { font-family: 'Orbitron', sans-serif; font-size: 10px; color: var(--accent); text-align: center; margin-bottom: 8px; letter-spacing: 1px; }
-.match-slot { display: flex; flex-direction: column; justify-content: center; margin-bottom: 12px; }
+.round-body { display: flex; flex-direction: column; justify-content: space-around; flex: 1; }
+
+/* each match block */
+.match-slot {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1;
+  position: relative;
+  padding: 6px 0;
+}
+.match-box { display: flex; flex-direction: column; gap: 4px; }
+
+/* connector lines drawn to the right of each match (except final round) */
+.round-col:not(:last-child) .match-slot::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 16px;
+  height: 1px;
+  background: var(--border);
+}
+/* vertical connector joining two sibling matches into the next round */
+.round-col:not(:last-child) .match-slot.join-down::before,
+.round-col:not(:last-child) .match-slot.join-up::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  width: 1px;
+  background: var(--border);
+}
+.match-slot.join-down::before { top: 50%; height: 50%; }
+.match-slot.join-up::before { bottom: 50%; height: 50%; }
+
+.round-col { padding: 0 8px; }
+
 .match-player {
   background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-  padding: 8px 10px; font-size: 12px; width: 130px; margin: 2px 0; position: relative;
+  padding: 8px 10px; font-size: 12px; width: 130px; position: relative;
 }
-.match-player.winner { border-color: var(--gold); background: rgba(255,215,0,0.1); color: var(--gold); font-weight: 700; }
+.match-player.winner { border-color: #888; background: #2e2e2e; color: #fff; font-weight: 700; }
 .match-player.bye { border-style: dashed; color: var(--muted); font-style: italic; }
-.match-score { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-family: 'Orbitron', sans-serif; font-size: 11px; color: var(--gold); }
+.match-score { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-family: 'Orbitron', sans-serif; font-size: 11px; color: #ccc; }
 
 /* VS DISPLAY */
 .vs-display { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; margin-bottom: 16px; }
@@ -378,7 +414,9 @@ select option { background: #14143a; }
       </div>
     </div>
 
-    <button class="btn btn-danger" onclick="confirmEndMatch()" style="width:100%;justify-content:center">🏁 結束此場比賽</button>
+    <div class="card" style="background:#2a2a2a;border-color:#444;font-size:12px;color:var(--muted);text-align:center">
+      率先達到 4 分自動獲勝並晉級
+    </div>
   </div>
 </div>
 
@@ -856,20 +894,26 @@ function generateBracket() {
   const total = nextPow2(n);
   const byeCount = total - n;
 
-  // Spread BYEs evenly using seeded slot ordering.
-  // buildSeededSlots returns slot indices in bracket order (1vs last, 2vs second-last…)
-  // Players fill slots 0..n-1; slots n..total-1 are BYE (null).
+  // Standard seeding ensures BYEs only occur in round 1 and are spread
+  // evenly across the bracket. Bye-winners advance to round 2 — never
+  // skipping directly to a later round.
+  // slots[i] = which seed sits at bracket position i.
   const slots = buildSeededSlots(total);
+
+  // Seeds 0..n-1 are real players (already shuffled = random seeding),
+  // seeds n..total-1 are BYEs. With standard seeding, the lowest seeds
+  // (here: the first shuffled players) receive the byes — and there is at
+  // most one bye per round-1 match, so no match is BYE vs BYE.
   const seededPlayers = new Array(total).fill(null);
   for (let i = 0; i < n; i++) seededPlayers[i] = shuffled[i];
   const ordered = slots.map(s => seededPlayers[s]);
 
   const firstRound = [];
   for (let i = 0; i < total; i+=2) {
-    const m = { p1: ordered[i], p2: ordered[i+1], score1:0, score2:0, winner:null, history:[], complete:false };
-    if (m.p1 && !m.p2) { m.winner = m.p1; m.complete = true; }
-    if (!m.p1 && m.p2) { m.winner = m.p2; m.complete = true; }
-    if (!m.p1 && !m.p2) { m.complete = true; }
+    const m = { p1: ordered[i], p2: ordered[i+1], score1:0, score2:0, winner:null, history:[], complete:false, bye:false };
+    // BYE auto-advance (only ever one side is null in round 1)
+    if (m.p1 && !m.p2) { m.winner = m.p1; m.complete = true; m.bye = true; }
+    if (!m.p1 && m.p2) { m.winner = m.p2; m.complete = true; m.bye = true; }
     firstRound.push(m);
   }
 
@@ -878,7 +922,7 @@ function generateBracket() {
   while (prev.length > 1) {
     const next = [];
     for (let i=0; i<prev.length; i+=2) {
-      next.push({ p1: prev[i].winner||null, p2: prev[i+1]?.winner||null, score1:0, score2:0, winner:null, history:[], complete:false });
+      next.push({ p1: prev[i].winner||null, p2: prev[i+1]?.winner||null, score1:0, score2:0, winner:null, history:[], complete:false, bye:false });
     }
     tState.bracket.push(next);
     prev = next;
@@ -888,6 +932,9 @@ function generateBracket() {
   tState.roster = [...selectedSetupPlayers];
   tState.tStats = {};
   tState.champion = null;
+  tState.currentMatch = null;
+  tState.finished = false;
+  tState.archiveId = null;
 
   // Mark tournament participation in career
   libPlayers.forEach(p => {
@@ -900,7 +947,7 @@ function generateBracket() {
   renderBracket();
   renderBattleTab();
   switchTab('bracket');
-  showToast('🎲 抽籤完成！');
+  showToast(byeCount > 0 ? `🎲 抽籤完成！${byeCount} 位選手輪空晉級第二輪` : '🎲 抽籤完成！');
 }
 
 function nextPow2(n) { let p=1; while(p<n) p*=2; return p; }
@@ -937,16 +984,35 @@ function renderBracket() {
   tState.bracket.forEach((round, ri) => {
     const col = document.createElement('div');
     col.className = 'round-col';
-    col.innerHTML = `<div class="round-label">${rnames[ri]}</div>`;
-    round.forEach(m => {
+
+    const label = document.createElement('div');
+    label.className = 'round-label';
+    label.textContent = rnames[ri];
+    col.appendChild(label);
+
+    const body = document.createElement('div');
+    body.className = 'round-body';
+
+    round.forEach((m, mi) => {
       const slot = document.createElement('div');
-      slot.className = 'match-slot';
-      slot.innerHTML = pSlot(m.p1, m.score1, m.winner && samePID(m.winner, m.p1)) +
-        '<div style="height:4px"></div>' +
+      // join-down for even (top) match, join-up for odd (bottom) match,
+      // so the vertical line connects each pair into the next round
+      let cls = 'match-slot';
+      if (ri < tState.bracket.length - 1) {
+        cls += (mi % 2 === 0) ? ' join-down' : ' join-up';
+      }
+      slot.className = cls;
+
+      const box = document.createElement('div');
+      box.className = 'match-box';
+      box.innerHTML =
+        pSlot(m.p1, m.score1, m.winner && samePID(m.winner, m.p1)) +
         pSlot(m.p2, m.score2, m.winner && samePID(m.winner, m.p2));
-      col.appendChild(slot);
-      const sp = document.createElement('div'); sp.style.height='12px'; col.appendChild(sp);
+      slot.appendChild(box);
+      body.appendChild(slot);
     });
+
+    col.appendChild(body);
     viz.appendChild(col);
   });
 }
@@ -1080,6 +1146,7 @@ function undoScore(pi) {
 }
 
 function finishMatch(m, winnerIdx) {
+  if (m.complete) return; // already finished — prevent double recording
   const winner = winnerIdx===0 ? m.p1 : m.p2;
   const loser  = winnerIdx===0 ? m.p2 : m.p1;
   m.winner = winner; m.complete = true;
@@ -1124,13 +1191,19 @@ function finishMatch(m, winnerIdx) {
     const slot = matchIdx%2===0?'p1':'p2';
     nextRound[nmi][slot] = winner;
   } else {
-    // Champion!
-    tState.champion = winner;
-    if (winner.id && playerDb[winner.id]) playerDb[winner.id].career.championships=(playerDb[winner.id].career.championships||0)+1;
-    document.getElementById('winnerName').textContent = winner?.name||winner;
-    document.getElementById('winBanner').style.display='block';
-    showToast('🏆 冠軍：'+(winner?.name||winner));
-    archiveTournament(winner);
+    // Final match — champion! Guard against any double recording.
+    if (!tState.champion && !m.archived) {
+      m.archived = true;          // mark this final match as already processed
+      tState.champion = winner;
+      tState.finished = true;     // tournament locked
+      if (winner.id && playerDb[winner.id]) {
+        playerDb[winner.id].career.championships = (playerDb[winner.id].career.championships||0) + 1;
+      }
+      document.getElementById('winnerName').textContent = winner?.name||winner;
+      document.getElementById('winBanner').style.display='block';
+      showToast('🏆 冠軍：'+(winner?.name||winner)+'！賽事結束');
+      archiveTournament(winner);
+    }
   }
 
   syncPlayerDb();
@@ -1141,14 +1214,6 @@ function finishMatch(m, winnerIdx) {
   loadMatch();
   renderRank();
   if (nextRound) showToast('🏁 '+(winner?.name||winner)+' 獲勝，晉級！');
-}
-
-function confirmEndMatch() {
-  const m = getCurMatch();
-  if (!m) return;
-  if (!m.p1||!m.p2) return;
-  if (m.score1===m.score2) { showToast('平分！需分出勝負'); return; }
-  finishMatch(m, m.score1>m.score2?0:1);
 }
 
 // =========================================
@@ -1242,7 +1307,11 @@ function archiveTournament(champion) {
     if (m.p2) names.add(m.p2.name||m.p2);
   });
 
-  const id = 't_' + Date.now();
+  // Stable ID based on tournament start, so a duplicate archive call
+  // overwrites the same record instead of creating a second one.
+  const id = tState.archiveId || ('t_' + Date.now());
+  tState.archiveId = id;
+
   const record = {
     id,
     name: tState.name || 'G3 賽事',
