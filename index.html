@@ -652,8 +652,7 @@ function initCareer() {
   return { wins:0, losses:0, spin:0, burst:0, over:0, xtreme:0, totalScore:0, tournaments:0, championships:0, history:[] };
 }
 
-function saveNewPlayer() { requireAdmin(_saveNewPlayer); }
-function _saveNewPlayer() {
+function saveNewPlayer() {
   const name = document.getElementById('newPlayerName').value.trim();
   if (!name) { showToast('請輸入選手名字'); return; }
   const nick = document.getElementById('newPlayerNick').value.trim();
@@ -738,8 +737,7 @@ function editPlayer() {
   showModal('editModal');
 }
 
-function saveEditPlayer() { requireAdmin(_saveEditPlayer); }
-function _saveEditPlayer() {
+function saveEditPlayer() {
   const id = document.getElementById('editPlayerId').value;
   if (!playerDb[id]) return;
   playerDb[id].name = document.getElementById('editPlayerName').value.trim() || playerDb[id].name;
@@ -807,8 +805,7 @@ function quickAddPlayer() {
 // =========================================
 // BRACKET
 // =========================================
-function generateBracket() { requireAdmin(_generateBracket); }
-function _generateBracket() {
+function generateBracket() {
   const libPlayers = [...selectedSetupPlayers].map(id => ({ id, name: playerDb[id]?.name || '?' }));
   const temps = (tState.tempPlayers||[]).map(n => ({ id: null, name: n }));
   const all = [...libPlayers, ...temps];
@@ -1175,13 +1172,14 @@ function showToast(msg) {
 
 
 // =========================================
-// ADMIN / LOCK
+// ADMIN / LOCK (deletes only)
 // =========================================
 const ADMIN_KEY = 'g3_admin_unlocked';
+const ADMIN_HASH = 'ea79ab11f745619011b656ff542e33746b0a8b56a4754beefa7b779fbc781e07'; // SHA-256 of "g3admin"
 let isAdmin = false;
+let pendingAction = null;
 
 function checkAdminSession() {
-  // Session-only: unlocked state resets on page close
   isAdmin = sessionStorage.getItem(ADMIN_KEY) === '1';
   updateLockBadge();
 }
@@ -1192,12 +1190,17 @@ function updateLockBadge() {
   if (isAdmin) {
     badge.className = 'lock-badge unlocked';
     label.textContent = '管理員';
-    badge.children[0].textContent = '🔓';
+    badge.firstChild.textContent = '🔓 ';
   } else {
     badge.className = 'lock-badge';
     label.textContent = '未解鎖';
-    badge.children[0].textContent = '🔒';
+    badge.firstChild.textContent = '🔒 ';
   }
+}
+
+async function hashStr(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
 function showLockModal() {
@@ -1205,12 +1208,13 @@ function showLockModal() {
   if (isAdmin) {
     el.innerHTML = `
       <div class="modal-title">🔓 管理員模式</div>
-      <div style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:20px">目前已解鎖管理員權限</div>
+      <div style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:20px">已解鎖，可執行刪除操作</div>
       <button class="btn btn-danger" style="width:100%;justify-content:center;margin-bottom:8px" onclick="lockAdmin()">🔒 登出管理員</button>
       <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="closeModal('lockModal')">取消</button>`;
   } else {
     el.innerHTML = `
       <div class="modal-title">🔒 管理員登入</div>
+      <div style="text-align:center;color:var(--muted);font-size:12px;margin-bottom:14px">刪除選手與歷史紀錄需要管理員密碼</div>
       <label>管理員密碼</label>
       <input type="password" id="adminPwInput" placeholder="輸入密碼" style="margin-bottom:16px" onkeydown="if(event.key==='Enter')tryUnlock()">
       <button class="btn btn-primary" onclick="tryUnlock()" style="margin-bottom:8px">解鎖</button>
@@ -1222,8 +1226,6 @@ function showLockModal() {
 
 function tryUnlock() {
   const pw = document.getElementById('adminPwInput')?.value || '';
-  // SHA-256 hash comparison — change ADMIN_HASH to your password's hash
-  // Default password: g3admin  (change this before deploying!)
   hashStr(pw).then(h => {
     if (h === ADMIN_HASH) {
       isAdmin = true;
@@ -1233,7 +1235,8 @@ function tryUnlock() {
       showToast('✅ 已解鎖管理員模式');
     } else {
       showToast('❌ 密碼錯誤');
-      document.getElementById('adminPwInput').value = '';
+      const el = document.getElementById('adminPwInput');
+      if (el) el.value = '';
     }
   });
 }
@@ -1246,32 +1249,21 @@ function lockAdmin() {
   showToast('🔒 已登出管理員');
 }
 
-async function hashStr(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-}
-
-// SHA-256 of "g3admin" — replace to change password
-// To generate: open browser console and run: hashStr('yourpassword').then(console.log)
-const ADMIN_HASH = 'ea79ab11f745619011b656ff542e33746b0a8b56a4754beefa7b779fbc781e07';
-
 function requireAdmin(action) {
   if (isAdmin) { action(); return; }
-  // Show lock modal, store pending action
   pendingAction = action;
   const el = document.getElementById('lockModalContent');
   el.innerHTML = `
     <div class="modal-title">🔒 需要管理員權限</div>
-    <div style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:16px">此操作需要管理員密碼</div>
+    <div style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:16px">刪除操作需要管理員密碼</div>
     <label>管理員密碼</label>
     <input type="password" id="adminPwInput" placeholder="輸入密碼" style="margin-bottom:16px" onkeydown="if(event.key==='Enter')tryUnlockAndRun()">
-    <button class="btn btn-primary" onclick="tryUnlockAndRun()" style="margin-bottom:8px">驗證並執行</button>
+    <button class="btn btn-primary" onclick="tryUnlockAndRun()" style="margin-bottom:8px">驗證並刪除</button>
     <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="closeModal('lockModal');pendingAction=null;">取消</button>`;
   showModal('lockModal');
   setTimeout(()=>document.getElementById('adminPwInput')?.focus(), 100);
 }
 
-let pendingAction = null;
 function tryUnlockAndRun() {
   const pw = document.getElementById('adminPwInput')?.value || '';
   hashStr(pw).then(h => {
@@ -1280,11 +1272,12 @@ function tryUnlockAndRun() {
       sessionStorage.setItem(ADMIN_KEY, '1');
       updateLockBadge();
       closeModal('lockModal');
-      showToast('✅ 已解鎖，執行操作');
+      showToast('✅ 已解鎖，執行刪除');
       if (pendingAction) { pendingAction(); pendingAction = null; }
     } else {
       showToast('❌ 密碼錯誤');
-      document.getElementById('adminPwInput').value = '';
+      const el = document.getElementById('adminPwInput');
+      if (el) el.value = '';
     }
   });
 }
