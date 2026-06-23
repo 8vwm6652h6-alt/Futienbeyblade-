@@ -653,12 +653,13 @@ function connectPlayerDb() {
 }
 
 // Join a room — only syncs the live tournament/scoring between two devices.
-function connectFirebase() {
+function connectFirebase(isAutoRejoin) {
   const room = document.getElementById('roomId').value.trim();
   if (!room) { showToast('請輸入房間代號'); return; }
 
   if (!initFirebase()) return;
 
+  const switchingRoom = currentRoom && currentRoom !== room;
   currentRoom = room;
 
   // Detach previous room listener
@@ -666,17 +667,24 @@ function connectFirebase() {
 
   roomRef = db.ref('rooms/' + room);
 
-  // First load: read existing room data ONCE before attaching live listener,
-  // so we never overwrite an in-progress tournament with our local empty state.
+  // Read existing room data ONCE before attaching live listener.
   roomRef.once('value').then(snap => {
     const data = snap.val();
-    if (data) {
+    if (data && data.bracket) {
       // Room already has a tournament → adopt it
       tState = { ...tState, ...data };
       renderAll();
+      renderActiveView();
     } else {
-      // Empty room → push our current state as the starting point
-      syncTournament();
+      // Empty room.
+      // If this is an auto-rejoin of the SAME saved room on app load, keep
+      // local state (recovering a session). Otherwise (manually joining a
+      // new/different room), start clean so we don't carry an old bracket in.
+      if (!isAutoRejoin || switchingRoom) {
+        clearLocalTournament();
+      }
+      syncTournament(); // push (possibly cleared) state as room's starting point
+      renderAll();
     }
 
     // Now attach the live listener for real-time updates
@@ -696,6 +704,22 @@ function connectFirebase() {
   document.getElementById('syncStatus').textContent = '房間 ' + room;
   closeModal('firebaseModal');
   showToast('✅ 已加入房間：' + room);
+}
+
+// Reset only the live tournament (not player library / history)
+function clearLocalTournament() {
+  tState.name = '';
+  tState.roster = [];
+  tState.tempPlayers = [];
+  tState.bracket = [];
+  tState.currentMatch = null;
+  tState.tStats = {};
+  tState.champion = null;
+  tState.finished = false;
+  tState.archiveId = null;
+  selectedSetupPlayers = new Set();
+  const wb = document.getElementById('winBanner');
+  if (wb) wb.style.display = 'none';
 }
 
 // Helper: refresh open profile modal when playerDb updates
@@ -1732,7 +1756,7 @@ window.addEventListener('load', () => {
   if (savedRoom) {
     document.getElementById('roomId').value = savedRoom;
     currentRoom = savedRoom;
-    connectFirebase();
+    connectFirebase(true); // auto-rejoin: keep local session if room empty
   }
 });
 </script>
