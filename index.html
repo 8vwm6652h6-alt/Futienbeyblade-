@@ -62,7 +62,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Noto Sans TC', s
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
 .tabs {
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   background: var(--surface); border-bottom: 1px solid var(--border);
   position: sticky; top: 53px; z-index: 99;
 }
@@ -248,6 +248,7 @@ select option { background: #14143a; }
   <div class="tab" onclick="switchTab('bracket')"><span class="tab-icon">🏆</span>對戰表</div>
   <div class="tab" onclick="switchTab('battle')"><span class="tab-icon">⚡</span>計分</div>
   <div class="tab" onclick="switchTab('rank')"><span class="tab-icon">👑</span>排行榜</div>
+  <div class="tab" onclick="switchTab('history')"><span class="tab-icon">📜</span>歷史</div>
 </nav>
 
 <!-- ===== PLAYERS TAB ===== -->
@@ -410,6 +411,16 @@ select option { background: #14143a; }
   </div>
 </div>
 
+<!-- ===== HISTORY TAB ===== -->
+<div class="section" id="tab-history">
+  <div id="historyEmpty" class="empty-state">
+    <div class="empty-icon">📜</div>
+    <div>尚無完成的賽事</div>
+    <div style="font-size:12px;margin-top:8px">完成決賽後會自動記錄於此</div>
+  </div>
+  <div id="historyContent" style="display:none"></div>
+</div>
+
 <!-- ADMIN LOCK MODAL -->
 <div class="modal-overlay" id="lockModal" onclick="if(event.target===this)closeModal('lockModal')">
   <div class="modal modal-center" style="border-radius:16px;margin:20px auto">
@@ -512,6 +523,8 @@ const FIREBASE_URL = 'https://beyblade-g3-default-rtdb.asia-southeast1.firebased
 let db = null, roomRef = null, playerDbRef = null, isConnected = false;
 let firebaseApp = null;
 let currentRoom = null;
+let archiveRef = null;
+let archiveData = {};
 
 let currentProfileId = null;
 let selectedNewColor = COLORS[4];
@@ -573,6 +586,16 @@ function connectPlayerDb() {
     console.error('playerDb error:', err);
     showToast('❌ 選手庫讀取失敗：' + err.message);
   });
+
+  // Tournament archive (history) — app-bound, always loaded
+  if (archiveRef) { archiveRef.off(); }
+  archiveRef = db.ref('archive');
+  archiveRef.on('value', snap => {
+    archiveData = snap.val() || {};
+    if (document.getElementById('tab-history').classList.contains('active')) renderHistory();
+  }, err => {
+    console.error('archive error:', err);
+  });
 }
 
 // Join a room — only syncs the live tournament/scoring between two devices.
@@ -621,7 +644,7 @@ function syncTournament() { if (roomRef) roomRef.set(tState).catch(console.error
 // TABS
 // =========================================
 function switchTab(name) {
-  const tabs = ['players','setup','bracket','battle','rank'];
+  const tabs = ['players','setup','bracket','battle','rank','history'];
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', tabs[i]===name));
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
@@ -629,6 +652,7 @@ function switchTab(name) {
   if (name==='bracket') renderBracket();
   if (name==='battle') renderBattleTab();
   if (name==='setup') renderSetupPlayerList();
+  if (name==='history') renderHistory();
 }
 
 // =========================================
@@ -1086,6 +1110,7 @@ function finishMatch(m, winnerIdx) {
     document.getElementById('winnerName').textContent = winner?.name||winner;
     document.getElementById('winBanner').style.display='block';
     showToast('🏆 冠軍：'+(winner?.name||winner));
+    archiveTournament(winner);
   }
 
   syncPlayerDb();
@@ -1168,6 +1193,101 @@ function _deleteHistoryEntry(playerId, index) {
   syncPlayerDb();
   openProfile(playerId); // refresh modal
   showToast('🗑️ 已刪除紀錄');
+}
+
+// =========================================
+// TOURNAMENT HISTORY ARCHIVE
+// =========================================
+function archiveTournament(champion) {
+  const rnames = getRoundNames(tState.bracket.length);
+  const matches = [];
+  (tState.bracket||[]).forEach((round, ri) => {
+    round.forEach(m => {
+      if (m.complete && m.p1 && m.p2) {
+        matches.push({
+          round: rnames[ri],
+          p1: m.p1.name||m.p1,
+          p2: m.p2.name||m.p2,
+          score1: m.score1,
+          score2: m.score2,
+          winner: m.winner?.name||m.winner
+        });
+      }
+    });
+  });
+
+  const names = new Set();
+  (tState.bracket?.[0]||[]).forEach(m => {
+    if (m.p1) names.add(m.p1.name||m.p1);
+    if (m.p2) names.add(m.p2.name||m.p2);
+  });
+
+  const id = 't_' + Date.now();
+  const record = {
+    id,
+    name: tState.name || 'G3 賽事',
+    champion: champion?.name || champion,
+    date: new Date().toLocaleString('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
+    players: [...names],
+    matches
+  };
+
+  if (archiveRef) {
+    archiveRef.child(id).set(record).catch(console.error);
+  } else {
+    archiveData[id] = record;
+  }
+}
+
+function renderHistory() {
+  const records = Object.values(archiveData).sort((a,b) => (b.id>a.id?1:-1));
+  const empty = document.getElementById('historyEmpty');
+  const content = document.getElementById('historyContent');
+  if (!records.length) {
+    empty.style.display = 'block';
+    content.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  content.style.display = 'block';
+
+  content.innerHTML = records.map(r => `
+    <div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:15px;font-weight:700">${r.name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.date}</div>
+        </div>
+        <button class="btn btn-danger btn-xs" onclick="deleteHistoryRecord('${r.id}')" style="flex-shrink:0">🗑️</button>
+      </div>
+      <div style="margin:10px 0;padding:8px 12px;background:#2a2a2a;border-radius:8px;font-size:13px">
+        🏆 冠軍：<strong style="color:#eee">${r.champion||'—'}</strong>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">參賽選手（${(r.players||[]).length}）：${(r.players||[]).join('、')}</div>
+      <details style="margin-top:8px">
+        <summary style="font-size:12px;color:var(--cyan);cursor:pointer;user-select:none">📋 對戰結果（${(r.matches||[]).length} 場）</summary>
+        <div style="margin-top:8px">
+          ${(r.matches||[]).map(m => `
+            <div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid #333;font-size:12px">
+              <span style="font-size:10px;color:var(--muted);width:50px;flex-shrink:0">${m.round}</span>
+              <span style="flex:1;text-align:right;${m.winner===m.p1?'color:#eee;font-weight:700':'color:var(--muted)'}">${m.p1}</span>
+              <span style="font-family:Orbitron;font-size:11px;color:#aaa;flex-shrink:0;padding:0 2px">${m.score1}-${m.score2}</span>
+              <span style="flex:1;${m.winner===m.p2?'color:#eee;font-weight:700':'color:var(--muted)'}">${m.p2}</span>
+            </div>
+          `).join('')}
+        </div>
+      </details>
+    </div>
+  `).join('');
+}
+
+function deleteHistoryRecord(id) { requireAdmin(()=>_deleteHistoryRecord(id)); }
+function _deleteHistoryRecord(id) {
+  if (!confirm('確定刪除這場賽事紀錄？')) return;
+  if (archiveRef) archiveRef.child(id).remove().catch(console.error);
+  delete archiveData[id];
+  renderHistory();
+  showToast('🗑️ 已刪除賽事紀錄');
 }
 
 function renderAll() {
