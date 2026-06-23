@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0d0d0d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>BeybladeX G3 賽事系統</title>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Noto+Sans+TC:wght@400;700&display=swap');
+
+:root {
+  --bg: #0d0d0d;
+  --surface: #1a1a1a;
+  --card: #222222;
+  --border: #3a3a3a;
+  --accent: #ffffff;
+  --accent2: #cccccc;
+  --gold: #eeeeee;
+  --cyan: #bbbbbb;
+  --text: #eeeeee;
+  --muted: #666666;
+  --spin: #aaaaaa;
+  --burst: #aaaaaa;
+  --xtreme: #aaaaaa;
+  --over: #aaaaaa;
+  --green: #cccccc;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body { background: var(--bg); color: var(--text); font-family: 'Noto Sans TC', sans-serif; min-height: 100vh; overflow-x: hidden; }
+
+.app-header {
+  background: #111111;
+  border-bottom: 2px solid var(--accent);
+  padding: 12px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 100;
+}
+
+.app-title {
+  font-family: 'Noto Sans TC', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 0px;
+  color: #ffffff;
+}
+.sync-badge {
+  font-size: 10px; padding: 3px 8px; border-radius: 20px;
+  border: 1px solid var(--muted); color: var(--muted);
+  display: flex; align-items: center; gap: 4px; cursor: pointer;
+}
+.sync-badge.connected { border-color: #aaaaaa; color: #aaaaaa; }
+.lock-badge {
+  font-size: 11px; padding: 3px 10px; border-radius: 20px;
+  border: 1px solid #555; color: #888; cursor: pointer;
+  display: flex; align-items: center; gap: 4px; user-select: none;
+}
+.lock-badge.unlocked { border-color: #aaa; color: #ddd; }
+.sync-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.sync-badge.connected .sync-dot { animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+.tabs {
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  position: sticky; top: 53px; z-index: 99;
+}
+.tab {
+  padding: 8px 2px; text-align: center; font-size: 10px; color: var(--muted);
+  cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; user-select: none;
+}
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-icon { font-size: 16px; display: block; margin-bottom: 2px; }
+
+.section { display: none; padding: 16px; padding-bottom: 32px; }
+.section.active { display: block; }
+
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+.card-title { font-family: 'Orbitron', sans-serif; font-size: 12px; color: var(--cyan); margin-bottom: 12px; letter-spacing: 1px; }
+
+input, select, textarea {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); padding: 10px 12px; font-size: 14px;
+  font-family: 'Noto Sans TC', sans-serif; width: 100%; outline: none;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: block; }
+
+.btn {
+  border: none; border-radius: 8px; padding: 12px 16px; font-size: 14px; font-weight: 700;
+  cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px;
+  font-family: 'Noto Sans TC', sans-serif; user-select: none; touch-action: manipulation;
+}
+.btn:active { transform: scale(0.96); }
+.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: white; width: 100%; justify-content: center; }
+.btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn-green { background: linear-gradient(135deg, #1b5e20, #2e7d32); color: white; width: 100%; justify-content: center; }
+.btn-danger { background: #c62828; color: white; }
+.btn-small { padding: 8px 12px; font-size: 12px; }
+.btn-xs { padding: 5px 10px; font-size: 11px; }
+
+/* SCORE BUTTONS */
+.score-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.score-btn {
+  border: none; border-radius: 10px; padding: 16px 8px; font-size: 12px; font-weight: 700;
+  cursor: pointer; text-align: center; transition: all 0.15s;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  font-family: 'Noto Sans TC', sans-serif; touch-action: manipulation; user-select: none;
+}
+.score-btn:active { transform: scale(0.93); filter: brightness(1.3); }
+.score-btn .pts { font-family: 'Orbitron', sans-serif; font-size: 20px; }
+.btn-spin { background: #2a2a2a; border: 2px solid #555; color: #ccc; }
+.btn-burst { background: #2a2a2a; border: 2px solid #555; color: #ccc; }
+.btn-over { background: #2a2a2a; border: 2px solid #555; color: #ccc; }
+.btn-xtreme { background: #2a2a2a; border: 2px solid #555; color: #ccc; }
+
+/* PLAYER LIBRARY */
+.player-lib-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 12px;
+  cursor: pointer; transition: border-color 0.2s;
+}
+.player-lib-card:active { border-color: var(--accent); }
+.player-lib-card.selected { border-color: var(--green); background: rgba(0,200,83,0.08); }
+.player-avatar {
+  width: 40px; height: 40px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 700; flex-shrink: 0;
+  font-family: 'Orbitron', sans-serif;
+}
+.player-lib-info { flex: 1; min-width: 0; }
+.player-lib-name { font-size: 14px; font-weight: 700; }
+.player-lib-nick { font-size: 11px; color: var(--muted); }
+.player-lib-stats { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.player-lib-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* BRACKET */
+.bracket-container { overflow-x: auto; padding-bottom: 12px; }
+.bracket { display: flex; gap: 20px; min-width: max-content; padding: 8px 0; }
+.round-col { display: flex; flex-direction: column; }
+.round-label { font-family: 'Orbitron', sans-serif; font-size: 10px; color: var(--accent); text-align: center; margin-bottom: 8px; letter-spacing: 1px; }
+.match-slot { display: flex; flex-direction: column; justify-content: center; margin-bottom: 12px; }
+.match-player {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; font-size: 12px; width: 130px; margin: 2px 0; position: relative;
+}
+.match-player.winner { border-color: var(--gold); background: rgba(255,215,0,0.1); color: var(--gold); font-weight: 700; }
+.match-player.bye { border-style: dashed; color: var(--muted); font-style: italic; }
+.match-score { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-family: 'Orbitron', sans-serif; font-size: 11px; color: var(--gold); }
+
+/* VS DISPLAY */
+.vs-display { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; margin-bottom: 16px; }
+.vs-player { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 8px; text-align: center; }
+.vs-player.p1 { border-color: var(--accent); }
+.vs-player.p2 { border-color: var(--cyan); }
+.vs-name { font-size: 13px; font-weight: 700; }
+.vs-sep { font-family: 'Orbitron', sans-serif; font-size: 20px; color: var(--muted); text-align: center; }
+
+/* LEADERBOARD */
+.rank-table { width: 100%; border-collapse: collapse; }
+.rank-table th { font-size: 10px; color: var(--muted); text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); font-weight: 400; }
+.rank-table td { padding: 10px 8px; border-bottom: 1px solid rgba(42,42,106,0.5); font-size: 13px; }
+.rank-table tr:last-child td { border-bottom: none; }
+.rank-num { font-family: 'Orbitron', sans-serif; font-size: 12px; color: var(--muted); }
+
+.awards-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.award-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
+.award-icon { font-size: 26px; margin-bottom: 4px; }
+.award-title { font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+.award-winner { font-size: 14px; font-weight: 700; color: var(--gold); }
+.award-stat { font-size: 11px; color: var(--muted); }
+
+/* PROFILE MODAL */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: none; align-items: flex-end; justify-content: center; }
+.modal-overlay.open { display: flex; }
+.modal { background: var(--card); border: 1px solid var(--border); border-radius: 20px 20px 0 0; padding: 20px; width: 100%; max-height: 85vh; overflow-y: auto; }
+.modal-center { border-radius: 16px; max-width: 360px; margin: auto; }
+.modal-handle { width: 40px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 16px; }
+.modal-title { font-family: 'Orbitron', sans-serif; font-size: 14px; color: var(--cyan); margin-bottom: 16px; text-align: center; }
+
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+.stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 6px; text-align: center; }
+.stat-num { font-family: 'Orbitron', sans-serif; font-size: 20px; font-weight: 700; }
+.stat-lbl { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+.history-item { padding: 8px 0; border-bottom: 1px solid #333; font-size: 12px; display: flex; align-items: center; gap: 4px; }
+.history-item:last-child { border-bottom: none; }
+.hist-result-win { color: var(--green); font-weight: 700; }
+.hist-result-loss { color: var(--accent); }
+
+.color-picker { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.color-swatch { width: 32px; height: 32px; border-radius: 50%; cursor: pointer; border: 3px solid transparent; transition: border-color 0.15s; }
+.color-swatch.selected { border-color: white; }
+
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+  background: var(--card); border: 1px solid var(--accent); border-radius: 20px;
+  padding: 10px 20px; font-size: 13px; color: var(--text); z-index: 999;
+  transition: transform 0.3s ease; white-space: nowrap;
+  box-shadow: 0 4px 24px rgba(255,60,0,0.3);
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+
+.win-banner {
+  background: #2a2a2a;
+  border: 2px solid #555555; border-radius: 12px; padding: 16px; text-align: center; margin-bottom: 16px;
+  animation: winGlow 1.5s infinite alternate;
+}
+@keyframes winGlow { from{box-shadow:0 0 6px rgba(255,255,255,0.1)} to{box-shadow:0 0 16px rgba(255,255,255,0.25)} }
+.win-banner .winner-name { font-family: 'Orbitron', sans-serif; font-size: 20px; color: var(--gold); font-weight: 900; }
+
+.empty-state { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 14px; }
+.empty-icon { font-size: 48px; margin-bottom: 12px; }
+
+.row { display: flex; gap: 8px; align-items: flex-end; }
+.row > * { flex: 1; }
+.row > .btn { flex: 0 0 auto; }
+
+.check-icon { color: var(--green); font-size: 18px; }
+.section-divider { height: 1px; background: var(--border); margin: 12px 0; }
+
+.firebase-note { background: #2a2a2a; border: 1px solid #444444; border-radius: 8px; padding: 12px; font-size: 12px; color: #aaaaaa; margin-bottom: 12px; line-height: 1.6; }
+
+select option { background: #14143a; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; margin-right: 4px; }
+.tag-win { background: rgba(0,200,83,0.2); color: var(--green); }
+.tag-loss { background: rgba(255,60,0,0.15); color: #ff6b6b; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="app-title">北屯倉儲 × 福田戰鬥陀螺</div>
+  <div style="display:flex;gap:8px;align-items:center">
+  <div class="lock-badge" id="lockBadge" onclick="showLockModal()">🔒 <span id="lockLabel">未解鎖</span></div>
+  <div class="sync-badge" id="syncBadge" onclick="showModal('firebaseModal')">
+    <span class="sync-dot"></span>
+    <span id="syncStatus">未連線</span>
+  </div>
+  </div>
+</header>
+
+<nav class="tabs">
+  <div class="tab active" onclick="switchTab('players')"><span class="tab-icon">👤</span>選手庫</div>
+  <div class="tab" onclick="switchTab('setup')"><span class="tab-icon">⚙️</span>設定</div>
+  <div class="tab" onclick="switchTab('bracket')"><span class="tab-icon">🏆</span>對戰表</div>
+  <div class="tab" onclick="switchTab('battle')"><span class="tab-icon">⚡</span>計分</div>
+  <div class="tab" onclick="switchTab('rank')"><span class="tab-icon">👑</span>排行榜</div>
+</nav>
+
+<!-- ===== PLAYERS TAB ===== -->
+<div class="section active" id="tab-players">
+  <div class="card">
+    <div class="card-title">➕ 新增選手</div>
+    <label>名字</label>
+    <input type="text" id="newPlayerName" placeholder="選手姓名" style="margin-bottom:10px" onkeydown="if(event.key==='Enter')document.getElementById('newPlayerNick').focus()">
+    <label>暱稱／稱號（可選）</label>
+    <input type="text" id="newPlayerNick" placeholder="例：颶風王、閃電劍士" style="margin-bottom:10px" onkeydown="if(event.key==='Enter')saveNewPlayer()">
+    <label>頭像顏色</label>
+    <div class="color-picker" id="colorPicker"></div>
+    <div style="height:12px"></div>
+    <button class="btn btn-green" onclick="saveNewPlayer()">✅ 加入選手庫</button>
+  </div>
+
+  <div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+    <span style="font-size:12px;color:var(--muted)" id="playerCountLabel">選手庫</span>
+    <input type="text" id="playerSearch" placeholder="🔍 搜尋選手" style="width:140px;padding:6px 10px;font-size:12px" oninput="renderPlayerLibrary()">
+  </div>
+
+  <div id="playerLibraryList"></div>
+</div>
+
+<!-- ===== SETUP TAB ===== -->
+<div class="section" id="tab-setup">
+  <div class="card">
+    <div class="card-title">📋 本場賽事設定</div>
+    <label>賽事名稱</label>
+    <input type="text" id="tournamentName" placeholder="例：G3 第一屆大賽" style="margin-bottom:12px">
+  </div>
+
+  <div class="card">
+    <div class="card-title">👥 選擇出賽選手</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">從選手庫點選加入（已選 <span id="selectedCountLabel">0</span> 人）</div>
+    <div id="setupPlayerList"></div>
+    <div style="margin-top:12px">
+      <label>快速新增臨時選手</label>
+      <div class="row">
+        <input type="text" id="quickAddName" placeholder="輸入名字後按＋">
+        <button class="btn btn-secondary btn-small" onclick="quickAddPlayer()">＋</button>
+      </div>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" onclick="generateBracket()">🎲 隨機抽籤 / 產生對戰表</button>
+  <div style="height:8px"></div>
+  <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="showModal('firebaseModal')">🔗 設定雙設備同步</button>
+</div>
+
+<!-- ===== BRACKET TAB ===== -->
+<div class="section" id="tab-bracket">
+  <div id="bracketEmpty" class="empty-state">
+    <div class="empty-icon">🎯</div>
+    <div>尚未產生對戰表</div>
+    <div style="font-size:12px;margin-top:8px">請在「設定」頁選手並抽籤</div>
+  </div>
+  <div id="bracketContent" style="display:none">
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title" id="bracketTitle">🏆 淘汰賽對戰表</div>
+      <div class="bracket-container">
+        <div class="bracket" id="bracketViz"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== BATTLE TAB ===== -->
+<div class="section" id="tab-battle">
+  <div id="battleEmpty" class="empty-state">
+    <div class="empty-icon">⚡</div>
+    <div>尚未設定對戰</div>
+    <div style="font-size:12px;margin-top:8px">請先產生對戰表</div>
+  </div>
+  <div id="battleContent" style="display:none">
+    <div id="winBanner" style="display:none" class="win-banner">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:4px">🏆 本場冠軍</div>
+      <div class="winner-name" id="winnerName">—</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">⚡ 選擇場次</div>
+      <select id="matchSelect" onchange="loadMatch()">
+        <option value="">— 選擇場次 —</option>
+      </select>
+    </div>
+
+    <div class="vs-display">
+      <div class="vs-player p1">
+        <div class="vs-name" id="p1Name">—</div>
+        <div style="font-family:Orbitron;font-size:40px;color:#eeeeee;font-weight:900" id="p1Score">0</div>
+      </div>
+      <div class="vs-sep">VS</div>
+      <div class="vs-player p2">
+        <div class="vs-name" id="p2Name">—</div>
+        <div style="font-family:Orbitron;font-size:40px;color:#aaaaaa;font-weight:900" id="p2Score">0</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" id="p1ScoreLabel" style="color:var(--accent)">P1 得分</div>
+      <div class="score-grid">
+        <button class="score-btn btn-spin" onclick="addScore(0,'spin')"><span>轉停</span><span class="pts">+1</span></button>
+        <button class="score-btn btn-burst" onclick="addScore(0,'burst')"><span>爆裂</span><span class="pts">+2</span></button>
+        <button class="score-btn btn-over" onclick="addScore(0,'over')"><span>擊飛</span><span class="pts">+2</span></button>
+        <button class="score-btn btn-xtreme" onclick="addScore(0,'xtreme')"><span>極限</span><span class="pts">+3</span></button>
+      </div>
+      <button class="btn btn-secondary btn-small" onclick="undoScore(0)" style="width:100%;justify-content:center">↩ 撤銷上一次</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title" id="p2ScoreLabel" style="color:var(--cyan)">P2 得分</div>
+      <div class="score-grid">
+        <button class="score-btn btn-spin" onclick="addScore(1,'spin')"><span>轉停</span><span class="pts">+1</span></button>
+        <button class="score-btn btn-burst" onclick="addScore(1,'burst')"><span>爆裂</span><span class="pts">+2</span></button>
+        <button class="score-btn btn-over" onclick="addScore(1,'over')"><span>擊飛</span><span class="pts">+2</span></button>
+        <button class="score-btn btn-xtreme" onclick="addScore(1,'xtreme')"><span>極限</span><span class="pts">+3</span></button>
+      </div>
+      <button class="btn btn-secondary btn-small" onclick="undoScore(1)" style="width:100%;justify-content:center">↩ 撤銷上一次</button>
+    </div>
+
+    <div class="card" style="background:#2a2a2a;border-color:#444">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">📜 G3 規則</div>
+      <div style="font-size:12px;line-height:1.8">
+        轉停 +1 · 爆裂 +2 · 擊飛 +2 · 極限 +3<br>
+        <strong style="color:var(--gold)">率先達到 4 分者獲勝</strong>
+      </div>
+    </div>
+
+    <button class="btn btn-danger" onclick="confirmEndMatch()" style="width:100%;justify-content:center">🏁 結束此場比賽</button>
+  </div>
+</div>
+
+<!-- ===== RANK TAB ===== -->
+<div class="section" id="tab-rank">
+
+  <div id="rankEmpty" class="empty-state">
+    <div class="empty-icon">👑</div><div>尚無比賽紀錄</div>
+  </div>
+  <div id="rankContent" style="display:none">
+    <div class="awards-grid">
+      <div class="award-card" style="grid-column:1/-1">
+        <div class="award-icon">🏆</div><div class="award-title">冠軍王</div>
+        <div class="award-winner" id="award-champion">—</div>
+        <div class="award-stat" id="award-champion-stat"></div>
+      </div>
+      <div class="award-card"><div class="award-icon">⚔️</div><div class="award-title">勝場王</div><div class="award-winner" id="award-wins">—</div><div class="award-stat" id="award-wins-stat"></div></div>
+      <div class="award-card"><div class="award-icon">🌪️</div><div class="award-title">轉停王</div><div class="award-winner" id="award-spin">—</div><div class="award-stat" id="award-spin-stat"></div></div>
+      <div class="award-card"><div class="award-icon">💥</div><div class="award-title">擊飛王</div><div class="award-winner" id="award-over">—</div><div class="award-stat" id="award-over-stat"></div></div>
+      <div class="award-card"><div class="award-icon">🔥</div><div class="award-title">爆裂王</div><div class="award-winner" id="award-burst">—</div><div class="award-stat" id="award-burst-stat"></div></div>
+      <div class="award-card"><div class="award-icon">⚡</div><div class="award-title">極限王</div><div class="award-winner" id="award-xtreme">—</div><div class="award-stat" id="award-xtreme-stat"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-title" id="rankTableTitle">📊 積分排行</div>
+      <table class="rank-table">
+        <thead><tr><th>#</th><th>選手</th><th>勝</th><th>敗</th><th style="color:var(--spin)">停</th><th style="color:var(--over)">飛</th><th style="color:var(--burst)">裂</th><th style="color:var(--xtreme)">限</th></tr></thead>
+        <tbody id="rankBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ADMIN LOCK MODAL -->
+<div class="modal-overlay" id="lockModal" onclick="if(event.target===this)closeModal('lockModal')">
+  <div class="modal modal-center" style="border-radius:16px;margin:20px auto">
+    <div id="lockModalContent"></div>
+  </div>
+</div>
+
+<!-- FIREBASE MODAL -->
+<div class="modal-overlay" id="firebaseModal" onclick="if(event.target===this)closeModal('firebaseModal')">
+  <div class="modal modal-center" style="border-radius:16px;margin:20px auto">
+    <div class="modal-title">🔗 連線賽事同步</div>
+    <div style="background:#2a2a2a;border:1px solid #444;border-radius:8px;padding:12px;font-size:12px;color:#aaa;margin-bottom:16px;line-height:1.7">
+      兩台手機輸入<strong style="color:#eee">相同房間代號</strong>即可即時同步。<br>
+      選手資料庫為所有房間共用。
+    </div>
+    <label>房間代號</label>
+    <div class="row" style="margin-bottom:16px">
+      <input type="text" id="roomId" placeholder="例：g3-finals" onkeydown="if(event.key==='Enter')connectFirebase()">
+      <button class="btn btn-secondary btn-small" onclick="genRoomId()">隨機</button>
+    </div>
+    <button class="btn btn-primary" onclick="connectFirebase()" style="margin-bottom:8px">🔗 連線</button>
+    <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="closeModal('firebaseModal')">取消</button>
+  </div>
+</div>
+
+<!-- PLAYER PROFILE MODAL -->
+<div class="modal-overlay" id="profileModal" onclick="if(event.target===this)closeModal('profileModal')">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <div class="player-avatar" id="profileAvatar" style="width:52px;height:52px;font-size:22px"></div>
+      <div>
+        <div style="font-size:18px;font-weight:700" id="profileName"></div>
+        <div style="font-size:12px;color:var(--muted)" id="profileNick"></div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn btn-secondary btn-xs" onclick="editPlayer()">✏️</button>
+        <button class="btn btn-danger btn-xs" onclick="deletePlayerConfirm()">🗑️</button>
+      </div>
+    </div>
+
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">生涯戰績</div>
+    <div class="stat-grid">
+      <div class="stat-box"><div class="stat-num" id="ps-wins" style="color:var(--green)">0</div><div class="stat-lbl">勝場</div></div>
+      <div class="stat-box"><div class="stat-num" id="ps-losses" style="color:var(--accent)">0</div><div class="stat-lbl">敗場</div></div>
+      <div class="stat-box"><div class="stat-num" id="ps-tournaments" style="color:var(--gold)">0</div><div class="stat-lbl">參賽</div></div>
+      <div class="stat-box"><div class="stat-num" id="ps-spin" style="color:var(--spin)">0</div><div class="stat-lbl">轉停</div></div>
+      <div class="stat-box"><div class="stat-num" id="ps-over" style="color:var(--over)">0</div><div class="stat-lbl">擊飛</div></div>
+      <div class="stat-box"><div class="stat-num" id="ps-burst" style="color:var(--burst)">0</div><div class="stat-lbl">爆裂</div></div>
+      <div class="stat-box" style="grid-column:1/-1"><div class="stat-num" id="ps-xtreme" style="color:var(--xtreme)">0</div><div class="stat-lbl">極限</div></div>
+    </div>
+
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">最近對戰記錄</div>
+    <div id="profileHistory"></div>
+    <div style="height:12px"></div>
+    <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="closeModal('profileModal')">關閉</button>
+  </div>
+</div>
+
+<!-- EDIT PLAYER MODAL -->
+<div class="modal-overlay" id="editModal" onclick="if(event.target===this)closeModal('editModal')">
+  <div class="modal modal-center" style="border-radius:16px;margin:20px auto">
+    <div class="modal-title">✏️ 編輯選手</div>
+    <input type="hidden" id="editPlayerId">
+    <label>名字</label>
+    <input type="text" id="editPlayerName" style="margin-bottom:10px">
+    <label>暱稱／稱號</label>
+    <input type="text" id="editPlayerNick" style="margin-bottom:10px">
+    <label>頭像顏色</label>
+    <div class="color-picker" id="editColorPicker"></div>
+    <div style="height:12px"></div>
+    <button class="btn btn-primary" onclick="saveEditPlayer()" style="margin-bottom:8px">💾 儲存</button>
+    <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="closeModal('editModal')">取消</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// =========================================
+// STATE
+// =========================================
+const COLORS = ['#ff3c00','#ff8800','#ffd700','#4caf50','#00e5ff','#2196f3','#9c27b0','#e91e63','#ffffff','#7070b0'];
+const COLOR_LABELS = ['紅','橙','金','綠','青','藍','紫','粉','白','灰'];
+
+// playerDb: persisted per Firebase project (shared across all rooms)
+// tournamentState: persisted per room ID
+let playerDb = {};   // id -> { id, name, nick, color, career: {wins,losses,spin,burst,over,xtreme,totalScore,tournaments,championships, history:[]} }
+let tState = {       // tournament state, synced per room
+  name: '',
+  roster: [],        // player IDs selected for this tournament
+  tempPlayers: [],   // names for quick-add players (no library entry)
+  bracket: [],
+  currentMatch: null,
+  tStats: {},        // id/name -> {wins,losses,spin,burst,over,xtreme,totalScore} for THIS tournament
+  champion: null,
+};
+
+const FIREBASE_URL = 'https://beyblade-g3-default-rtdb.asia-southeast1.firebasedatabase.app';
+let db = null, roomRef = null, playerDbRef = null, isConnected = false;
+let firebaseApp = null;
+
+let currentProfileId = null;
+let selectedNewColor = COLORS[4];
+let selectedEditColor = COLORS[4];
+let selectedSetupPlayers = new Set();
+
+// =========================================
+// FIREBASE
+// =========================================
+function genRoomId() { document.getElementById('roomId').value = 'g3-' + Math.random().toString(36).slice(2,7); }
+
+// Initialize Firebase app once (SDK is loaded in <head>)
+function initFirebase() {
+  if (firebaseApp) return true;
+  if (typeof firebase === 'undefined' || !firebase.initializeApp) {
+    showToast('❌ Firebase 尚未載入，請重新整理頁面');
+    return false;
+  }
+  try {
+    firebaseApp = firebase.apps && firebase.apps.length
+      ? firebase.app()
+      : firebase.initializeApp({ databaseURL: FIREBASE_URL });
+    db = firebase.database(firebaseApp);
+    return true;
+  } catch (e) {
+    console.error('initFirebase error:', e);
+    showToast('❌ 初始化失敗：' + (e.message || '請重新整理'));
+    return false;
+  }
+}
+
+function connectFirebase() {
+  const room = document.getElementById('roomId').value.trim();
+  if (!room) { showToast('請輸入房間代號'); return; }
+
+  if (!initFirebase()) return;
+
+  showToast('🔄 連線中…');
+
+  // Detach previous listeners
+  if (playerDbRef) { playerDbRef.off(); playerDbRef = null; }
+  if (roomRef) { roomRef.off(); roomRef = null; }
+
+  // Connection state monitor
+  db.ref('.info/connected').on('value', snap => {
+    const connected = snap.val() === true;
+    const badge = document.getElementById('syncBadge');
+    const status = document.getElementById('syncStatus');
+    if (connected) {
+      isConnected = true;
+      badge.className = 'sync-badge connected';
+      status.textContent = room;
+    } else if (isConnected) {
+      status.textContent = '重連中…';
+    }
+  });
+
+  // Shared player database
+  playerDbRef = db.ref('playerDb');
+  playerDbRef.on('value', snap => {
+    const data = snap.val();
+    if (data) { playerDb = data; renderPlayerLibrary(); renderSetupPlayerList(); }
+  }, err => {
+    console.error('playerDb error:', err);
+    showToast('❌ 讀取失敗：' + err.message + '（請檢查資料庫規則）');
+  });
+
+  // Per-room tournament state
+  roomRef = db.ref('rooms/' + room);
+  roomRef.on('value', snap => {
+    const data = snap.val();
+    if (data) { tState = { ...tState, ...data }; renderAll(); }
+  }, err => {
+    console.error('room error:', err);
+    showToast('❌ 房間讀取失敗：' + err.message);
+  });
+
+  localStorage.setItem('fb_room', room);
+
+  isConnected = true;
+  document.getElementById('syncBadge').className = 'sync-badge connected';
+  document.getElementById('syncStatus').textContent = room;
+  closeModal('firebaseModal');
+  showToast('✅ 已連線！房間：' + room);
+  syncTournament();
+}
+
+function syncPlayerDb() { if (playerDbRef) playerDbRef.set(playerDb).catch(console.error); }
+function syncTournament() { if (roomRef) roomRef.set(tState).catch(console.error); }
+
+// =========================================
+// TABS
+// =========================================
+function switchTab(name) {
+  const tabs = ['players','setup','bracket','battle','rank'];
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', tabs[i]===name));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if (name==='rank') renderRank();
+  if (name==='bracket') renderBracket();
+  if (name==='battle') renderBattleTab();
+  if (name==='setup') renderSetupPlayerList();
+}
+
+// =========================================
+// MODAL
+// =========================================
+function showModal(id) {
+  document.getElementById(id).classList.add('open');
+  if (id === 'firebaseModal') {
+    const savedRoom = localStorage.getItem('fb_room') || '';
+    const roomEl = document.getElementById('roomId');
+    if (roomEl && !roomEl.value && savedRoom) roomEl.value = savedRoom;
+  }
+}
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// =========================================
+// COLOR PICKERS
+// =========================================
+function initColorPicker(containerId, onSelect, initial) {
+  const c = document.getElementById(containerId);
+  c.innerHTML = COLORS.map((col,i) => `
+    <div class="color-swatch${col===initial?' selected':''}" style="background:${col}" onclick="selectColor('${containerId}','${col}')" title="${COLOR_LABELS[i]}"></div>
+  `).join('');
+}
+function selectColor(containerId, col) {
+  document.querySelectorAll(`#${containerId} .color-swatch`).forEach(s => s.classList.toggle('selected', s.style.background===col||s.style.backgroundColor===col));
+  if (containerId==='colorPicker') selectedNewColor=col;
+  else selectedEditColor=col;
+}
+
+// =========================================
+// PLAYER LIBRARY
+// =========================================
+function genId() { return '_' + Math.random().toString(36).slice(2,9); }
+
+function initCareer() {
+  return { wins:0, losses:0, spin:0, burst:0, over:0, xtreme:0, totalScore:0, tournaments:0, championships:0, history:[] };
+}
+
+function saveNewPlayer() { requireAdmin(_saveNewPlayer); }
+function _saveNewPlayer() {
+  const name = document.getElementById('newPlayerName').value.trim();
+  if (!name) { showToast('請輸入選手名字'); return; }
+  const nick = document.getElementById('newPlayerNick').value.trim();
+  const id = genId();
+  playerDb[id] = { id, name, nick, color: selectedNewColor, career: initCareer() };
+  syncPlayerDb();
+  document.getElementById('newPlayerName').value = '';
+  document.getElementById('newPlayerNick').value = '';
+  renderPlayerLibrary();
+  renderSetupPlayerList();
+  showToast('✅ 已加入：' + name);
+}
+
+function renderPlayerLibrary() {
+  const query = (document.getElementById('playerSearch')?.value || '').toLowerCase();
+  const players = Object.values(playerDb).filter(p => !query || p.name.toLowerCase().includes(query) || (p.nick||'').toLowerCase().includes(query));
+  const list = document.getElementById('playerLibraryList');
+  document.getElementById('playerCountLabel').textContent = `選手庫（共 ${Object.keys(playerDb).length} 人）`;
+  if (!players.length) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">👤</div><div>尚無選手</div><div style="font-size:12px;margin-top:8px">在上方新增第一位選手</div></div>';
+    return;
+  }
+  list.innerHTML = players.map(p => {
+    const c = p.career || initCareer();
+    const winRate = (c.wins+c.losses) > 0 ? Math.round(c.wins/(c.wins+c.losses)*100) : 0;
+    return `<div class="player-lib-card" onclick="openProfile('${p.id}')">
+      <div class="player-avatar" style="background:${p.color}20;border:2px solid ${p.color};color:${p.color}">${p.name[0]}</div>
+      <div class="player-lib-info">
+        <div class="player-lib-name">${p.name}</div>
+        <div class="player-lib-nick">${p.nick||'&nbsp;'}</div>
+        <div class="player-lib-stats">勝率 ${winRate}% · ${c.wins}勝${c.losses}敗 · 參賽${c.tournaments}次</div>
+        <div class="player-lib-stats" style="margin-top:3px">🌪️${c.spin} 💥${c.over} 🔥${c.burst} ⚡${c.xtreme}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openProfile(id) {
+  const p = playerDb[id];
+  if (!p) return;
+  currentProfileId = id;
+  const c = p.career || initCareer();
+  document.getElementById('profileAvatar').textContent = p.name[0];
+  document.getElementById('profileAvatar').style.background = p.color + '20';
+  document.getElementById('profileAvatar').style.border = '2px solid ' + p.color;
+  document.getElementById('profileAvatar').style.color = p.color;
+  document.getElementById('profileName').textContent = p.name;
+  document.getElementById('profileNick').textContent = p.nick || '';
+  document.getElementById('ps-wins').textContent = c.wins;
+  document.getElementById('ps-losses').textContent = c.losses;
+  document.getElementById('ps-tournaments').textContent = c.tournaments;
+  document.getElementById('ps-spin').textContent = c.spin;
+  document.getElementById('ps-over').textContent = c.over;
+  document.getElementById('ps-burst').textContent = c.burst;
+  document.getElementById('ps-xtreme').textContent = c.xtreme;
+  const allHist = c.history||[];
+  const hist = allHist.slice().reverse().slice(0,20);
+  const totalLen = allHist.length;
+  document.getElementById('profileHistory').innerHTML = hist.length ? hist.map((h, i) => {
+    const realIdx = totalLen - 1 - i; // index in original array
+    return `<div class="history-item">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${h.tournament||'未知賽事'}</div>
+        <div style="font-size:11px;color:var(--muted)">vs ${h.opponent||'?'} · ${h.date||''}</div>
+      </div>
+      <span class="${h.result==='win'?'hist-result-win':'hist-result-loss'}" style="margin:0 10px;flex-shrink:0">${h.result==='win'?'✅ 勝':'❌ 敗'}</span>
+      <button class="btn btn-danger btn-xs" onclick="deleteHistoryEntry('${id}',${realIdx})" style="flex-shrink:0">🗑️</button>
+    </div>`;
+  }).join('') : '<div style="font-size:12px;color:var(--muted);padding:12px 0;text-align:center">尚無對戰記錄</div>';
+  showModal('profileModal');
+}
+
+function editPlayer() {
+  const p = playerDb[currentProfileId];
+  if (!p) return;
+  closeModal('profileModal');
+  document.getElementById('editPlayerId').value = p.id;
+  document.getElementById('editPlayerName').value = p.name;
+  document.getElementById('editPlayerNick').value = p.nick || '';
+  selectedEditColor = p.color;
+  initColorPicker('editColorPicker', null, p.color);
+  showModal('editModal');
+}
+
+function saveEditPlayer() { requireAdmin(_saveEditPlayer); }
+function _saveEditPlayer() {
+  const id = document.getElementById('editPlayerId').value;
+  if (!playerDb[id]) return;
+  playerDb[id].name = document.getElementById('editPlayerName').value.trim() || playerDb[id].name;
+  playerDb[id].nick = document.getElementById('editPlayerNick').value.trim();
+  playerDb[id].color = selectedEditColor;
+  syncPlayerDb();
+  closeModal('editModal');
+  renderPlayerLibrary();
+  renderSetupPlayerList();
+  showToast('✅ 已更新');
+}
+
+function deletePlayerConfirm() { requireAdmin(_deletePlayerConfirm); }
+function _deletePlayerConfirm() {
+  const p = playerDb[currentProfileId];
+  if (!p) return;
+  if (!confirm(`確定刪除「${p.name}」？戰績將一併清除。`)) return;
+  delete playerDb[currentProfileId];
+  syncPlayerDb();
+  closeModal('profileModal');
+  renderPlayerLibrary();
+  renderSetupPlayerList();
+  showToast('🗑️ 已刪除');
+}
+
+// =========================================
+// SETUP
+// =========================================
+function renderSetupPlayerList() {
+  const container = document.getElementById('setupPlayerList');
+  const players = Object.values(playerDb);
+  if (!players.length) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">選手庫空白，請先在「選手庫」新增</div>';
+    return;
+  }
+  container.innerHTML = players.map(p => {
+    const sel = selectedSetupPlayers.has(p.id);
+    return `<div class="player-lib-card${sel?' selected':''}" onclick="toggleSetupPlayer('${p.id}')">
+      <div class="player-avatar" style="background:${p.color}20;border:2px solid ${p.color};color:${p.color}">${p.name[0]}</div>
+      <div class="player-lib-info">
+        <div class="player-lib-name">${p.name}</div>
+        <div class="player-lib-nick">${p.nick||''}</div>
+      </div>
+      ${sel?'<span class="check-icon">✅</span>':''}
+    </div>`;
+  }).join('');
+  document.getElementById('selectedCountLabel').textContent = selectedSetupPlayers.size;
+}
+
+function toggleSetupPlayer(id) {
+  if (selectedSetupPlayers.has(id)) selectedSetupPlayers.delete(id);
+  else selectedSetupPlayers.add(id);
+  renderSetupPlayerList();
+}
+
+function quickAddPlayer() {
+  const name = document.getElementById('quickAddName').value.trim();
+  if (!name) return;
+  tState.tempPlayers = tState.tempPlayers || [];
+  tState.tempPlayers.push(name);
+  document.getElementById('quickAddName').value = '';
+  showToast('臨時加入：' + name);
+}
+
+// =========================================
+// BRACKET
+// =========================================
+function generateBracket() { requireAdmin(_generateBracket); }
+function _generateBracket() {
+  const libPlayers = [...selectedSetupPlayers].map(id => ({ id, name: playerDb[id]?.name || '?' }));
+  const temps = (tState.tempPlayers||[]).map(n => ({ id: null, name: n }));
+  const all = [...libPlayers, ...temps];
+  if (all.length < 2) { showToast('至少需要 2 位選手'); return; }
+
+  const shuffled = [...all].sort(() => Math.random() - 0.5);
+  const n = shuffled.length;
+  const total = nextPow2(n);
+  const byeCount = total - n;
+
+  // Spread BYEs evenly using seeded slot ordering.
+  // buildSeededSlots returns slot indices in bracket order (1vs last, 2vs second-last…)
+  // Players fill slots 0..n-1; slots n..total-1 are BYE (null).
+  const slots = buildSeededSlots(total);
+  const seededPlayers = new Array(total).fill(null);
+  for (let i = 0; i < n; i++) seededPlayers[i] = shuffled[i];
+  const ordered = slots.map(s => seededPlayers[s]);
+
+  const firstRound = [];
+  for (let i = 0; i < total; i+=2) {
+    const m = { p1: ordered[i], p2: ordered[i+1], score1:0, score2:0, winner:null, history:[], complete:false };
+    if (m.p1 && !m.p2) { m.winner = m.p1; m.complete = true; }
+    if (!m.p1 && m.p2) { m.winner = m.p2; m.complete = true; }
+    if (!m.p1 && !m.p2) { m.complete = true; }
+    firstRound.push(m);
+  }
+
+  tState.bracket = [firstRound];
+  let prev = firstRound;
+  while (prev.length > 1) {
+    const next = [];
+    for (let i=0; i<prev.length; i+=2) {
+      next.push({ p1: prev[i].winner||null, p2: prev[i+1]?.winner||null, score1:0, score2:0, winner:null, history:[], complete:false });
+    }
+    tState.bracket.push(next);
+    prev = next;
+  }
+
+  tState.name = document.getElementById('tournamentName').value || 'G3 賽事';
+  tState.roster = [...selectedSetupPlayers];
+  tState.tStats = {};
+  tState.champion = null;
+
+  // Mark tournament participation in career
+  libPlayers.forEach(p => {
+    if (!playerDb[p.id]) return;
+    playerDb[p.id].career = playerDb[p.id].career || initCareer();
+    playerDb[p.id].career.tournaments++;
+  });
+  syncPlayerDb();
+  syncTournament();
+  renderBracket();
+  renderBattleTab();
+  switchTab('bracket');
+  showToast('🎲 抽籤完成！');
+}
+
+function nextPow2(n) { let p=1; while(p<n) p*=2; return p; }
+
+// Returns an array of length `size` (must be power of 2) that maps
+// bracket positions to seed indices, using standard tournament seeding.
+// e.g. size=8 → [0,7,3,4,1,6,2,5]  (seed1 vs seed8, seed4 vs seed5 …)
+// BYEs (seeds >= actual player count) end up paired against real players
+// spread across the bracket rather than all bunched at the bottom.
+function buildSeededSlots(size) {
+  let slots = [0, 1];
+  while (slots.length < size) {
+    const next = [];
+    const len = slots.length * 2;
+    for (const s of slots) {
+      next.push(s);
+      next.push(len - 1 - s);
+    }
+    slots = next;
+  }
+  return slots;
+}
+
+function renderBracket() {
+  const empty = document.getElementById('bracketEmpty');
+  const content = document.getElementById('bracketContent');
+  if (!tState.bracket?.length) { empty.style.display='block'; content.style.display='none'; return; }
+  empty.style.display='none'; content.style.display='block';
+  if (tState.name) document.getElementById('bracketTitle').textContent = '🏆 ' + tState.name;
+
+  const viz = document.getElementById('bracketViz');
+  const rnames = getRoundNames(tState.bracket.length);
+  viz.innerHTML = '';
+  tState.bracket.forEach((round, ri) => {
+    const col = document.createElement('div');
+    col.className = 'round-col';
+    col.innerHTML = `<div class="round-label">${rnames[ri]}</div>`;
+    round.forEach(m => {
+      const slot = document.createElement('div');
+      slot.className = 'match-slot';
+      slot.innerHTML = pSlot(m.p1, m.score1, m.winner && samePID(m.winner, m.p1)) +
+        '<div style="height:4px"></div>' +
+        pSlot(m.p2, m.score2, m.winner && samePID(m.winner, m.p2));
+      col.appendChild(slot);
+      const sp = document.createElement('div'); sp.style.height='12px'; col.appendChild(sp);
+    });
+    viz.appendChild(col);
+  });
+}
+
+function samePID(a, b) { if (!a||!b) return false; if (a.id && b.id) return a.id===b.id; return a.name===b.name; }
+function pSlot(p, score, isWin) {
+  if (!p) return `<div class="match-player bye">輪空</div>`;
+  return `<div class="match-player${isWin?' winner':''}">
+    ${p.name||p}<span class="match-score">${score>0?score:''}</span>
+  </div>`;
+}
+function getRoundNames(total) {
+  return Array.from({length:total}, (_,i) => {
+    if (i===total-1) return '決賽';
+    if (i===total-2) return '準決賽';
+    return `第${i+1}輪`;
+  });
+}
+
+// =========================================
+// BATTLE
+// =========================================
+function populateMatchSelect() {
+  const sel = document.getElementById('matchSelect');
+  sel.innerHTML = '<option value="">— 選擇場次 —</option>';
+  if (!tState.bracket) return;
+  const rnames = getRoundNames(tState.bracket.length);
+  tState.bracket.forEach((round, ri) => {
+    round.forEach((m, mi) => {
+      if (m.complete || !m.p1 || !m.p2) return;
+      const o = document.createElement('option');
+      o.value = `${ri}-${mi}`;
+      o.textContent = `${rnames[ri]}：${m.p1.name||m.p1} vs ${m.p2.name||m.p2}`;
+      sel.appendChild(o);
+    });
+  });
+}
+
+function renderBattleTab() {
+  const empty = document.getElementById('battleEmpty');
+  const content = document.getElementById('battleContent');
+  if (!tState.bracket?.length) { empty.style.display='block'; content.style.display='none'; return; }
+  empty.style.display='none'; content.style.display='block';
+  populateMatchSelect();
+  const selVal = document.getElementById('matchSelect').value;
+  if (!selVal) loadMatch();
+}
+
+function loadMatch() {
+  const sel = document.getElementById('matchSelect').value;
+  document.getElementById('winBanner').style.display = tState.champion ? 'block' : 'none';
+  if (tState.champion) document.getElementById('winnerName').textContent = tState.champion.name || tState.champion;
+  if (!sel) { setVsDisplay('—','—','0','0','P1 得分','P2 得分'); return; }
+  const [ri,mi] = sel.split('-').map(Number);
+  tState.currentMatch = { roundIdx:ri, matchIdx:mi };
+  const m = tState.bracket[ri][mi];
+  const n1 = m.p1?.name||m.p1||'—';
+  const n2 = m.p2?.name||m.p2||'—';
+  setVsDisplay(n1, n2, m.score1, m.score2, n1+' 得分', n2+' 得分');
+}
+
+function setVsDisplay(n1,n2,s1,s2,l1,l2) {
+  document.getElementById('p1Name').textContent = n1;
+  document.getElementById('p2Name').textContent = n2;
+  document.getElementById('p1Score').textContent = s1;
+  document.getElementById('p2Score').textContent = s2;
+  document.getElementById('p1ScoreLabel').textContent = l1;
+  document.getElementById('p2ScoreLabel').textContent = l2;
+}
+
+function getCurMatch() {
+  if (!tState.currentMatch) return null;
+  return tState.bracket?.[tState.currentMatch.roundIdx]?.[tState.currentMatch.matchIdx];
+}
+
+function addScore(pi, type) {
+  const m = getCurMatch();
+  if (!m) { showToast('請先選擇場次'); return; }
+  if (m.complete) { showToast('此場次已結束'); return; }
+  const pts = {spin:1,burst:2,over:2,xtreme:3}[type];
+  m.history = m.history||[];
+  m.history.push({pi,type,pts});
+  if (pi===0) m.score1+=pts; else m.score2+=pts;
+  document.getElementById('p1Score').textContent = m.score1;
+  document.getElementById('p2Score').textContent = m.score2;
+  const names = {spin:'轉停',burst:'爆裂',over:'擊飛',xtreme:'極限'};
+  const pname = pi===0 ? (m.p1?.name||m.p1) : (m.p2?.name||m.p2);
+  showToast(`${pname} ${names[type]} +${pts}`);
+  if (m.score1>=4||m.score2>=4) {
+    const wi = m.score1>=4?0:1;
+    finishMatch(m, wi);
+    return;
+  }
+  syncTournament();
+}
+
+function undoScore(pi) {
+  const m = getCurMatch();
+  if (!m?.history?.length) return;
+  for (let i=m.history.length-1;i>=0;i--) {
+    if (m.history[i].pi===pi) {
+      const {pts}=m.history[i];
+      m.history.splice(i,1);
+      if (pi===0) m.score1=Math.max(0,m.score1-pts); else m.score2=Math.max(0,m.score2-pts);
+      break;
+    }
+  }
+  document.getElementById('p1Score').textContent=m.score1;
+  document.getElementById('p2Score').textContent=m.score2;
+  syncTournament(); showToast('↩ 已撤銷');
+}
+
+function finishMatch(m, winnerIdx) {
+  const winner = winnerIdx===0 ? m.p1 : m.p2;
+  const loser  = winnerIdx===0 ? m.p2 : m.p1;
+  m.winner = winner; m.complete = true;
+
+  // Update tournament stats
+  const wKey = winner?.id || winner?.name || winner;
+  const lKey = loser?.id  || loser?.name  || loser;
+  const initT = () => ({wins:0,losses:0,spin:0,burst:0,over:0,xtreme:0,totalScore:0});
+  if (!tState.tStats[wKey]) tState.tStats[wKey]=initT();
+  if (!tState.tStats[lKey]) tState.tStats[lKey]=initT();
+  tState.tStats[wKey].wins++;
+  tState.tStats[lKey].losses++;
+  (m.history||[]).forEach(h => {
+    const p = h.pi===0?m.p1:m.p2;
+    const k = p?.id||p?.name||p;
+    if (!tState.tStats[k]) tState.tStats[k]=initT();
+    tState.tStats[k][h.type]++;
+    tState.tStats[k].totalScore+=h.pts;
+  });
+
+  // Update career stats in playerDb
+  const updateCareer = (p, isWinner, opp) => {
+    if (!p?.id || !playerDb[p.id]) return;
+    const c = playerDb[p.id].career = playerDb[p.id].career || initCareer();
+    if (isWinner) c.wins++; else c.losses++;
+    (m.history||[]).forEach(h => {
+      const hp = h.pi===0?m.p1:m.p2;
+      if (samePID(hp,p)) { c[h.type]++; c.totalScore+=h.pts; }
+    });
+    c.history = c.history||[];
+    c.history.push({ tournament: tState.name, opponent: opp?.name||opp, result: isWinner?'win':'loss', date: new Date().toLocaleDateString('zh-TW') });
+    if (c.history.length>50) c.history=c.history.slice(-50);
+  };
+  updateCareer(winner.id?winner:null, true,  loser);
+  updateCareer(loser.id?loser:null,  false, winner);
+
+  // Advance bracket
+  const {roundIdx,matchIdx} = tState.currentMatch;
+  const nextRound = tState.bracket[roundIdx+1];
+  if (nextRound) {
+    const nmi = Math.floor(matchIdx/2);
+    const slot = matchIdx%2===0?'p1':'p2';
+    nextRound[nmi][slot] = winner;
+  } else {
+    // Champion!
+    tState.champion = winner;
+    if (winner.id && playerDb[winner.id]) playerDb[winner.id].career.championships=(playerDb[winner.id].career.championships||0)+1;
+    document.getElementById('winnerName').textContent = winner?.name||winner;
+    document.getElementById('winBanner').style.display='block';
+    showToast('🏆 冠軍：'+(winner?.name||winner));
+  }
+
+  syncPlayerDb();
+  syncTournament();
+  renderBracket();
+  populateMatchSelect();
+  document.getElementById('matchSelect').value='';
+  loadMatch();
+  renderRank();
+  if (nextRound) showToast('🏁 '+(winner?.name||winner)+' 獲勝，晉級！');
+}
+
+function confirmEndMatch() {
+  const m = getCurMatch();
+  if (!m) return;
+  if (!m.p1||!m.p2) return;
+  if (m.score1===m.score2) { showToast('平分！需分出勝負'); return; }
+  finishMatch(m, m.score1>m.score2?0:1);
+}
+
+// =========================================
+// RANK
+// =========================================
+function renderRank() {
+  document.getElementById('rankTableTitle').textContent = '📊 生涯排行';
+
+  const statsEntries = Object.values(playerDb).map(p => ({
+    name: p.name, nick: p.nick||'',
+    ...(p.career || initCareer())
+  }));
+
+  if (!statsEntries.length) {
+    document.getElementById('rankEmpty').style.display='block';
+    document.getElementById('rankContent').style.display='none';
+    return;
+  }
+  document.getElementById('rankEmpty').style.display='none';
+  document.getElementById('rankContent').style.display='block';
+
+  const sorted = [...statsEntries].sort((a,b)=>b.wins-a.wins||b.totalScore-a.totalScore);
+  const best = (key) => statsEntries.reduce((b,p)=>(p[key]||0)>(b[key]||0)?p:b, statsEntries[0]);
+
+  // 冠軍王 = 最多冠軍次數
+  const champKing = statsEntries.reduce((b,p)=>((p.championships||0)>(b.championships||0)?p:b), statsEntries[0]);
+  document.getElementById('award-champion').textContent = champKing?.name || '—';
+  document.getElementById('award-champion-stat').textContent = champKing ? `${champKing.championships||0} 次冠軍` : '';
+
+  const sa=(id,sid,key,lbl)=>{const p=best(key);document.getElementById(id).textContent=p?p.name:'—';document.getElementById(sid).textContent=p?(p[key]||0)+lbl:'';};
+  sa('award-wins','award-wins-stat','wins','勝');
+  sa('award-spin','award-spin-stat','spin','次');
+  sa('award-over','award-over-stat','over','次');
+  sa('award-burst','award-burst-stat','burst','次');
+  sa('award-xtreme','award-xtreme-stat','xtreme','次');
+
+  document.getElementById('rankBody').innerHTML = sorted.map((s,i) => `
+    <tr>
+      <td class="rank-num">${i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</td>
+      <td>
+        <div style="font-size:13px">${s.name}</div>
+        ${s.nick?`<div style="font-size:10px;color:var(--muted)">${s.nick}</div>`:''}
+        ${s.championships?`<div style="font-size:10px;color:var(--gold)">🏆×${s.championships}</div>`:''}
+      </td>
+      <td style="color:var(--spin)">${s.wins||0}</td>
+      <td style="color:var(--muted)">${s.losses||0}</td>
+      <td style="color:var(--spin);font-size:11px">${s.spin||0}</td>
+      <td style="color:var(--over);font-size:11px">${s.over||0}</td>
+      <td style="color:var(--burst);font-size:11px">${s.burst||0}</td>
+      <td style="color:var(--xtreme);font-size:11px">${s.xtreme||0}</td>
+    </tr>`).join('');
+}
+
+// =========================================
+// UTILS
+// =========================================
+function deleteHistoryEntry(playerId, index) { requireAdmin(()=>_deleteHistoryEntry(playerId,index)); }
+function _deleteHistoryEntry(playerId, index) {
+  const p = playerDb[playerId];
+  if (!p?.career?.history) return;
+  p.career.history.splice(index, 1);
+  syncPlayerDb();
+  openProfile(playerId); // refresh modal
+  showToast('🗑️ 已刪除紀錄');
+}
+
+function renderAll() {
+  renderPlayerLibrary();
+  renderSetupPlayerList();
+  renderBracket();
+  renderBattleTab();
+  renderRank();
+}
+
+let toastTimer;
+function showToast(msg) {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove('show'),2300);
+}
+
+
+// =========================================
+// ADMIN / LOCK
+// =========================================
+const ADMIN_KEY = 'g3_admin_unlocked';
+let isAdmin = false;
+
+function checkAdminSession() {
+  // Session-only: unlocked state resets on page close
+  isAdmin = sessionStorage.getItem(ADMIN_KEY) === '1';
+  updateLockBadge();
+}
+
+function updateLockBadge() {
+  const badge = document.getElementById('lockBadge');
+  const label = document.getElementById('lockLabel');
+  if (isAdmin) {
+    badge.className = 'lock-badge unlocked';
+    label.textContent = '管理員';
+    badge.children[0].textContent = '🔓';
+  } else {
+    badge.className = 'lock-badge';
+    label.textContent = '未解鎖';
+    badge.children[0].textContent = '🔒';
+  }
+}
+
+function showLockModal() {
+  const el = document.getElementById('lockModalContent');
+  if (isAdmin) {
+    el.innerHTML = `
+      <div class="modal-title">🔓 管理員模式</div>
+      <div style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:20px">目前已解鎖管理員權限</div>
+      <button class="btn btn-danger" style="width:100%;justify-content:center;margin-bottom:8px" onclick="lockAdmin()">🔒 登出管理員</button>
+      <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="closeModal('lockModal')">取消</button>`;
+  } else {
+    el.innerHTML = `
+      <div class="modal-title">🔒 管理員登入</div>
+      <label>管理員密碼</label>
+      <input type="password" id="adminPwInput" placeholder="輸入密碼" style="margin-bottom:16px" onkeydown="if(event.key==='Enter')tryUnlock()">
+      <button class="btn btn-primary" onclick="tryUnlock()" style="margin-bottom:8px">解鎖</button>
+      <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="closeModal('lockModal')">取消</button>`;
+    setTimeout(()=>document.getElementById('adminPwInput')?.focus(), 100);
+  }
+  showModal('lockModal');
+}
+
+function tryUnlock() {
+  const pw = document.getElementById('adminPwInput')?.value || '';
+  // SHA-256 hash comparison — change ADMIN_HASH to your password's hash
+  // Default password: g3admin  (change this before deploying!)
+  hashStr(pw).then(h => {
+    if (h === ADMIN_HASH) {
+      isAdmin = true;
+      sessionStorage.setItem(ADMIN_KEY, '1');
+      updateLockBadge();
+      closeModal('lockModal');
+      showToast('✅ 已解鎖管理員模式');
+    } else {
+      showToast('❌ 密碼錯誤');
+      document.getElementById('adminPwInput').value = '';
+    }
+  });
+}
+
+function lockAdmin() {
+  isAdmin = false;
+  sessionStorage.removeItem(ADMIN_KEY);
+  updateLockBadge();
+  closeModal('lockModal');
+  showToast('🔒 已登出管理員');
+}
+
+async function hashStr(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// SHA-256 of "g3admin" — replace to change password
+// To generate: open browser console and run: hashStr('yourpassword').then(console.log)
+const ADMIN_HASH = 'ea79ab11f745619011b656ff542e33746b0a8b56a4754beefa7b779fbc781e07';
+
+function requireAdmin(action) {
+  if (isAdmin) { action(); return; }
+  // Show lock modal, store pending action
+  pendingAction = action;
+  const el = document.getElementById('lockModalContent');
+  el.innerHTML = `
+    <div class="modal-title">🔒 需要管理員權限</div>
+    <div style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:16px">此操作需要管理員密碼</div>
+    <label>管理員密碼</label>
+    <input type="password" id="adminPwInput" placeholder="輸入密碼" style="margin-bottom:16px" onkeydown="if(event.key==='Enter')tryUnlockAndRun()">
+    <button class="btn btn-primary" onclick="tryUnlockAndRun()" style="margin-bottom:8px">驗證並執行</button>
+    <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="closeModal('lockModal');pendingAction=null;">取消</button>`;
+  showModal('lockModal');
+  setTimeout(()=>document.getElementById('adminPwInput')?.focus(), 100);
+}
+
+let pendingAction = null;
+function tryUnlockAndRun() {
+  const pw = document.getElementById('adminPwInput')?.value || '';
+  hashStr(pw).then(h => {
+    if (h === ADMIN_HASH) {
+      isAdmin = true;
+      sessionStorage.setItem(ADMIN_KEY, '1');
+      updateLockBadge();
+      closeModal('lockModal');
+      showToast('✅ 已解鎖，執行操作');
+      if (pendingAction) { pendingAction(); pendingAction = null; }
+    } else {
+      showToast('❌ 密碼錯誤');
+      document.getElementById('adminPwInput').value = '';
+    }
+  });
+}
+
+// =========================================
+// INIT
+// =========================================
+checkAdminSession();
+initColorPicker('colorPicker', null, selectedNewColor);
+renderPlayerLibrary();
+renderSetupPlayerList();
+
+// Auto-reconnect to last room on page load
+window.addEventListener('load', () => {
+  const savedRoom = localStorage.getItem('fb_room');
+  if (savedRoom) {
+    document.getElementById('roomId').value = savedRoom;
+    connectFirebase();
+  }
+});
+</script>
+</body>
+</html>
