@@ -349,7 +349,7 @@ select option { background: #14143a; }
     </div>
 
     <div class="card">
-      <div class="card-title" id="p1ScoreLabel" style="color:var(--accent)">P1 得分</div>
+      <div class="card-title" id="p1ScoreLabel" style="color:var(--accent)">選手 1 得分</div>
       <div class="score-grid">
         <button class="score-btn btn-spin" onclick="addScore(0,'spin')"><span>轉停</span><span class="pts">+1</span></button>
         <button class="score-btn btn-burst" onclick="addScore(0,'burst')"><span>爆裂</span><span class="pts">+2</span></button>
@@ -360,7 +360,7 @@ select option { background: #14143a; }
     </div>
 
     <div class="card">
-      <div class="card-title" id="p2ScoreLabel" style="color:var(--cyan)">P2 得分</div>
+      <div class="card-title" id="p2ScoreLabel" style="color:var(--cyan)">選手 2 得分</div>
       <div class="score-grid">
         <button class="score-btn btn-spin" onclick="addScore(1,'spin')"><span>轉停</span><span class="pts">+1</span></button>
         <button class="score-btn btn-burst" onclick="addScore(1,'burst')"><span>爆裂</span><span class="pts">+2</span></button>
@@ -971,9 +971,11 @@ function getRoundNames(total) {
 // =========================================
 function populateMatchSelect() {
   const sel = document.getElementById('matchSelect');
+  const prevValue = sel.value; // remember current selection
   sel.innerHTML = '<option value="">— 選擇場次 —</option>';
   if (!tState.bracket) return;
   const rnames = getRoundNames(tState.bracket.length);
+  let prevStillValid = false;
   tState.bracket.forEach((round, ri) => {
     round.forEach((m, mi) => {
       if (m.complete || !m.p1 || !m.p2) return;
@@ -981,8 +983,11 @@ function populateMatchSelect() {
       o.value = `${ri}-${mi}`;
       o.textContent = `${rnames[ri]}：${m.p1.name||m.p1} vs ${m.p2.name||m.p2}`;
       sel.appendChild(o);
+      if (o.value === prevValue) prevStillValid = true;
     });
   });
+  // Restore previous selection if still available
+  if (prevStillValid) sel.value = prevValue;
 }
 
 function renderBattleTab() {
@@ -991,18 +996,33 @@ function renderBattleTab() {
   if (!tState.bracket?.length) { empty.style.display='block'; content.style.display='none'; return; }
   empty.style.display='none'; content.style.display='block';
   populateMatchSelect();
-  const selVal = document.getElementById('matchSelect').value;
-  if (!selVal) loadMatch();
+  loadMatch(); // always refresh display from current selection (live score updates)
 }
 
 function loadMatch() {
-  const sel = document.getElementById('matchSelect').value;
+  const selEl = document.getElementById('matchSelect');
+  let sel = selEl.value;
+
+  // If dropdown lost selection but we have a stored current match, restore it
+  if (!sel && tState.currentMatch) {
+    const cand = `${tState.currentMatch.roundIdx}-${tState.currentMatch.matchIdx}`;
+    // only restore if that match is still selectable (not complete)
+    const m = tState.bracket?.[tState.currentMatch.roundIdx]?.[tState.currentMatch.matchIdx];
+    if (m && !m.complete && m.p1 && m.p2) {
+      selEl.value = cand;
+      sel = cand;
+    }
+  }
+
   document.getElementById('winBanner').style.display = tState.champion ? 'block' : 'none';
   if (tState.champion) document.getElementById('winnerName').textContent = tState.champion.name || tState.champion;
-  if (!sel) { setVsDisplay('—','—','0','0','P1 得分','P2 得分'); return; }
+
+  if (!sel) { setVsDisplay('—','—','0','0','選手 1 得分','選手 2 得分'); return; }
+
   const [ri,mi] = sel.split('-').map(Number);
   tState.currentMatch = { roundIdx:ri, matchIdx:mi };
   const m = tState.bracket[ri][mi];
+  if (!m) { setVsDisplay('—','—','0','0','選手 1 得分','選手 2 得分'); return; }
   const n1 = m.p1?.name||m.p1||'—';
   const n2 = m.p2?.name||m.p2||'—';
   setVsDisplay(n1, n2, m.score1, m.score2, n1+' 得分', n2+' 得分');
