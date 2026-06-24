@@ -343,6 +343,11 @@ select option { background: #14143a; }
     <div style="font-size:12px;margin-top:8px">請在「設定」頁選手並抽籤</div>
   </div>
   <div id="bracketContent" style="display:none">
+    <div id="bracketChampionBar" style="display:none;margin-bottom:12px;padding:14px;background:#2a2a2a;border:2px solid #666;border-radius:12px;text-align:center">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:2px">🏆 本場冠軍</div>
+      <div id="bracketChampionName" style="font-family:Orbitron;font-size:20px;font-weight:900;color:#fff;margin-bottom:10px">—</div>
+      <button class="btn btn-primary" onclick="startNextTournament()">🎲 開始下一場</button>
+    </div>
     <div class="card" style="margin-bottom:0">
       <div class="card-title" id="bracketTitle">🏆 淘汰賽對戰表</div>
       <div class="bracket-container">
@@ -1085,6 +1090,15 @@ function renderBracket() {
   empty.style.display='none'; content.style.display='block';
   if (tState.name) document.getElementById('bracketTitle').textContent = '🏆 ' + tState.name;
 
+  // Show champion bar + "start next" button once a champion is decided
+  const champBar = document.getElementById('bracketChampionBar');
+  if (tState.champion) {
+    champBar.style.display = 'block';
+    document.getElementById('bracketChampionName').textContent = tState.champion.name || tState.champion;
+  } else {
+    champBar.style.display = 'none';
+  }
+
   const viz = document.getElementById('bracketViz');
   const rnames = getRoundNames(tState.bracket.length);
   viz.innerHTML = '';
@@ -1356,6 +1370,7 @@ function startNextTournament() {
   syncTournament();
   // Reset UI
   document.getElementById('winBanner').style.display = 'none';
+  document.getElementById('bracketChampionBar').style.display = 'none';
   document.getElementById('tournamentName').value = '';
   renderAll();
   switchTab('setup');
