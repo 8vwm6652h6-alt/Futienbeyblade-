@@ -484,10 +484,12 @@ select option { background: #14143a; }
   <div id="historyContent" style="display:none"></div>
 
   <div class="section-divider" style="margin-top:24px"></div>
-  <div style="font-size:11px;color:var(--muted);margin-bottom:8px">⚠️ 危險操作</div>
-  <button class="btn btn-danger" style="width:100%;justify-content:center" onclick="resetAllData()">清除戰績與歷史</button>
+  <div style="font-size:11px;color:var(--muted);margin-bottom:8px">🔧 數據維護</div>
+  <button class="btn btn-secondary" style="width:100%;justify-content:center;margin-bottom:8px" onclick="checkDataConsistency()">檢查數據一致性</button>
+  <div id="consistencyResult" style="display:none;background:#1c1c1c;border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;font-size:12px;line-height:1.7"></div>
+  <button class="btn btn-secondary" style="width:100%;justify-content:center" onclick="recomputeAllStats()">依歷史重算全部數據</button>
   <div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6">
-    將所有選手的生涯戰績歸零、清空歷史賽事。選手本身會保留，可重新開始累積。此操作無法復原。
+    「檢查」會比對生涯數據與歷史賽事是否相符，找出殘留的孤兒數據。「重算」會以歷史賽事為準，重新計算所有選手的生涯數據（孤兒數據會自動清除）。
   </div>
 </div>
 
@@ -1684,38 +1686,70 @@ function _deleteSelectedHistory() {
   showToast(`🗑️ 已刪除 ${ids.length} 場賽事`);
 }
 
-function resetAllData() { requireAdmin(_resetAllData); }
-function _resetAllData() {
-  if (!confirm('⚠️ 確定要清除「戰績與歷史」嗎？\n\n包含：所有選手的生涯戰績、歷史賽事紀錄。\n（選手本身會保留，但數據歸零）\n此操作無法復原！')) return;
-  if (!confirm('再次確認：真的要清除所有戰績與歷史嗎？')) return;
+// ===== Data consistency: compare career stats vs sum of history records =====
+// Computes what each player's career SHOULD be, based purely on archived
+// tournaments (the single source of truth).
+function computeExpectedCareers() {
+  const expected = {}; // playerId -> career-like object
+  const ensure = (id) => expected[id] || (expected[id] = { wins:0,losses:0,spin:0,burst:0,over:0,xtreme:0,totalScore:0,tournaments:0,championships:0 });
+  Object.values(archiveData).forEach(rec => {
+    let contrib = rec.contrib;
+    if (!contrib || !Object.keys(contrib).length) contrib = rebuildContribByName(rec);
+    Object.entries(contrib).forEach(([key, c]) => {
+      // resolve to a player id (contrib may be id-keyed or name-keyed)
+      let pid = playerDb[key] ? key : (Object.values(playerDb).find(p => p.name === key)?.id);
+      if (!pid) return;
+      const e = ensure(pid);
+      ['wins','losses','spin','burst','over','xtreme','totalScore','tournaments','championships'].forEach(f => {
+        e[f] += (c[f]||0);
+      });
+    });
+  });
+  return expected;
+}
 
-  // Keep player library — reset each player's career stats to zero
+function checkDataConsistency() {
+  const expected = computeExpectedCareers();
+  const fields = [['wins','勝'],['losses','敗'],['tournaments','參賽'],['championships','冠軍'],['spin','轉停'],['over','擊飛'],['burst','爆裂'],['xtreme','極限'],['totalScore','總分']];
+  const issues = [];
   Object.values(playerDb).forEach(p => {
-    p.career = initCareer();
+    const cur = p.career || initCareer();
+    const exp = expected[p.id] || { wins:0,losses:0,spin:0,burst:0,over:0,xtreme:0,totalScore:0,tournaments:0,championships:0 };
+    const diffs = [];
+    fields.forEach(([f,label]) => {
+      const a = cur[f]||0, b = exp[f]||0;
+      if (a !== b) diffs.push(`${label} ${a}→${b}`);
+    });
+    if (diffs.length) issues.push({ name: p.name, diffs });
+  });
+
+  const el = document.getElementById('consistencyResult');
+  el.style.display = 'block';
+  if (!issues.length) {
+    el.innerHTML = '<span style="color:var(--green)">✅ 所有選手數據與歷史相符，沒有孤兒數據。</span>';
+  } else {
+    el.innerHTML = `<div style="color:#d99;margin-bottom:8px">⚠️ 發現 ${issues.length} 位選手數據與歷史不符：</div>` +
+      issues.map(i => `<div style="margin-bottom:4px"><strong>${i.name}</strong>：${i.diffs.join('、')}</div>`).join('') +
+      `<div style="color:var(--muted);margin-top:8px">（箭頭右側為依歷史應有的正確值。按「依歷史重算」可一鍵修正。）</div>`;
+  }
+}
+
+function recomputeAllStats() { requireAdmin(_recomputeAllStats); }
+function _recomputeAllStats() {
+  if (!confirm('確定要依歷史賽事重算所有選手的生涯數據嗎？\n\n會以歷史紀錄為準覆蓋現有數據，殘留的孤兒數據將被清除。\n（個人對戰記錄清單不受影響）')) return;
+  const expected = computeExpectedCareers();
+  Object.values(playerDb).forEach(p => {
+    const exp = expected[p.id] || { wins:0,losses:0,spin:0,burst:0,over:0,xtreme:0,totalScore:0,tournaments:0,championships:0 };
+    p.career = p.career || initCareer();
+    ['wins','losses','spin','burst','over','xtreme','totalScore','tournaments','championships'].forEach(f => {
+      p.career[f] = exp[f]||0;
+    });
   });
   syncPlayerDb();
-
-  // Clear archive (history)
-  archiveData = {};
-  if (archiveRef) archiveRef.set(null).catch(console.error);
-
-  // Clear current tournament state
-  tState.name = '';
-  tState.roster = [];
-  tState.tempPlayers = [];
-  tState.bracket = [];
-  tState.currentMatch = null;
-  tState.tStats = {};
-  tState.champion = null;
-  tState.finished = false;
-  tState.archiveId = null;
-  selectedSetupPlayers = new Set();
-  syncTournament();
-
-  renderAll();
-  renderHistory();
-  document.getElementById('winBanner').style.display = 'none';
-  showToast('🗑️ 已清除戰績與歷史（選手保留）');
+  renderPlayerLibrary();
+  renderRank();
+  document.getElementById('consistencyResult').style.display = 'none';
+  showToast('✅ 已依歷史重算所有數據');
 }
 
 function deleteHistoryRecord(id) { requireAdmin(()=>_deleteHistoryRecord(id)); }
